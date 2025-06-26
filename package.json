@@ -1,0 +1,60 @@
+{
+  "name": "screeps-bot-liangyibot",
+  "description": "A bot for the MMO RPG game Screeps, where you program your own AI.",
+  "version": "1.0.2",
+  "main": "./dist/main.js",
+
+  "screeps_bot": true,
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/static-1248/liangyibot.git"
+  },
+  "license": "MIT",
+  "author": "",
+
+  "scripts": {
+    "gulp": "gulp",
+    "deploy": "gulp build",
+    "deploy-ptr": "gulp buildptr --target ptr",
+    "deploy-min": "gulp buildmin --target bot",
+    "deploy-local": "gulp build --target local",
+    "start": "gulp watch",
+    "prod": "gulp watch --target prod",
+    "test": "gulp lint",
+    "tslint": "tslint \"src/**/*.ts\"",
+    "jshint-gulp": "jshint gulpfile.js libs/gulp-dot-flatten.js libs/gulp-screeps-upload.js"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.34.0",
+    "@typescript-eslint/parser": "^8.34.0",
+    "babel-core": "^6.26.0",
+    "babel-loader": "^7.1.2",
+    "babel-preset-env": "^1.7.0",
+    "deep-equal": "^1.0.1",
+    "eslint": "^9.29.0",
+    "gulp": "^5.0.1",
+    "gulp-babel": "^8.0.0",
+    "gulp-clean": "^0.4.0",
+    "gulp-collect": "^0.1.0",
+    "gulp-concat": "^2.6.1",
+    "gulp-eslint-new": "^2.4.0",
+    "gulp-rename": "^2.0.0",
+    "gulp-screeps": "^1.1.0",
+    "gulp-sourcemaps": "^3.0.0",
+    "gulp-typescript": "6.0.0-alpha.1",
+    "gulp-uglify": "^3.0.2",
+    "gulp-util": "^3.0.8",
+    "jshint": "^2.9.2",
+    "lodash": "^4.14.0",
+    "recast": "^0.11.10",
+    "simple-git": "^1.61.0",
+    "source-map": "^0.5.6",
+    "source-map-loader": "^4.0.2",
+    "through2": "^2.0.1",
+    "ts-loader": "^9.5.1",
+    "typescript": "^4.9.5",
+    "webpack": "^5.92.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-stream": "^7.0.0"
+  }
+}
