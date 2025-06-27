@@ -3,7 +3,6 @@
   "description": "A bot for the MMO RPG game Screeps, where you program your own AI.",
   "version": "1.0.2",
   "main": "./dist/main.js",
-
   "screeps_bot": true,
   "repository": {
     "type": "git",
@@ -11,7 +10,6 @@
   },
   "license": "MIT",
   "author": "",
-
   "scripts": {
     "gulp": "gulp",
     "deploy": "gulp build",
@@ -25,10 +23,12 @@
     "jshint-gulp": "jshint gulpfile.js libs/gulp-dot-flatten.js libs/gulp-screeps-upload.js"
   },
   "devDependencies": {
+    "@types/lodash": "^4.17.19",
+    "@types/node": "^24.0.4",
+    "@types/screeps": "^3.3.8",
     "@typescript-eslint/eslint-plugin": "^8.34.0",
     "@typescript-eslint/parser": "^8.34.0",
     "babel-core": "^6.26.0",
-    "babel-loader": "^7.1.2",
     "babel-preset-env": "^1.7.0",
     "deep-equal": "^1.0.1",
     "eslint": "^9.29.0",

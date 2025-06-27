@@ -1,24 +1,28 @@
 {
   "user": {
     "email": "YOUR_USERNAME",
-    "password": "YOUR_PASSWORD"
+    "password": "YOUR_PASSWORD",
+    "tokens": {
+      "token0": "YOUR_TOKEN"
+    }
   },
   "defaultTarget": "dev",
+  "defaultTokenName": "token0",
   "targets": {
     "dev": {
-      "branch": "default",
+      "branch": "LiangyiBot",
       "bundle": false,
       "lint": true,
       "lintRequired": false
     },
     "ptr": {
-      "branch": "default",
+      "branch": "LiangyiBot",
       "bundle": false,
       "lint": true,
       "lintRequired": false
     },
     "bot": {
-      "branch": "KasamiBot",
+      "branch": "LiangyiBot-min",
       "bundle": true,
       "lint": true,
       "lintRequired": false

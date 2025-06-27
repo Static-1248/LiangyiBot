@@ -1,4 +1,8 @@
 
+import { Harvester, CreepHarvester } from './roles/harvester';
+import { Upgrader, CreepUpgrader } from './roles/upgrader';
+import { Builder, CreepBuilder } from './roles/builder';
+import _ from 'lodash';
 
 try {
     var config = require("./config");
@@ -12,5 +16,90 @@ catch (e) {
 
 export function loop() {
 
-    console.log("Hello, world!");
+    for (var name in Memory.creeps) {
+        if (!Game.creeps[name]) {
+            delete Memory.creeps[name];
+            console.log('Clearing non-existing creep memory:', name);
+        }
+    }
+
+    for (const roomName in Game.rooms) {
+        const room = Game.rooms[roomName];
+        if (room.controller && room.controller.my) {
+            // Room is owned by the player
+            if (room.controller.level >= 1) {
+                // Room is at least level 1
+
+
+                const harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'harvester' && creep.room.name == room.name);
+                if (harvesters.length < 4) {
+                    const newName = 'Harvester' + Game.time;
+                    console.log('Spawning new harvester: ' + newName);
+                    Game.spawns['Spawn1'].spawnCreep([WORK, CARRY, MOVE], newName,
+                        { memory: { role: 'harvester' } });
+                }
+
+                const upgraders = _.filter(Game.creeps, (creep) => creep.memory.role == 'upgrader' && creep.room.name == room.name);
+                if (upgraders.length < 2) {
+                    const newName = 'Upgrader' + Game.time;
+                    console.log('Spawning new upgrader: ' + newName);
+                    Game.spawns['Spawn1'].spawnCreep([WORK, CARRY, MOVE], newName,
+                        { memory: { role: 'upgrader' } });
+                }
+
+                const builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'builder' && creep.room.name == room.name);
+                const constructionSites = room.find(FIND_CONSTRUCTION_SITES);
+                if (builders.length < 2 && constructionSites.length > 0) {
+                    const newName = 'Builder' + Game.time;
+                    console.log('Spawning new builder: ' + newName);
+                    Game.spawns['Spawn1'].spawnCreep([WORK, CARRY, MOVE], newName,
+                        { memory: { role: 'builder' } });
+                }
+
+                if (Game.spawns['Spawn1'].spawning) {
+                    const spawningCreep = Game.creeps[Game.spawns['Spawn1'].spawning.name];
+                    Game.spawns['Spawn1'].room.visual.text(
+                        '🛠️' + spawningCreep.memory.role,
+                        Game.spawns['Spawn1'].pos.x + 1,
+                        Game.spawns['Spawn1'].pos.y,
+                        { align: 'left', opacity: 0.8 });
+                }
+
+
+                const towers = room.find(FIND_MY_STRUCTURES, {
+                    filter: (structure) => structure.structureType === STRUCTURE_TOWER
+                }) as StructureTower[];
+                for (const tower of towers) {
+                    const closestHostile = tower.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+                    if (closestHostile) {
+                        tower.attack(closestHostile);
+                    } else {
+                        const closestDamagedStructure = tower.pos.findClosestByRange(FIND_STRUCTURES, {
+                            filter: (structure) => structure.hits < structure.hitsMax
+                        });
+                        if (closestDamagedStructure) {
+                            tower.repair(closestDamagedStructure);
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    for (const creepName in Game.creeps) {
+        var creep = Game.creeps[creepName];
+        if (!creep.memory.role) {
+            creep.memory.role = 'harvester'; // Default role if not set
+        }
+        if (creep.memory.role == 'harvester') {
+            Harvester.run(creep as CreepHarvester);
+        }
+        if (creep.memory.role == 'upgrader') {
+            Upgrader.run(creep as CreepUpgrader);
+        }
+        if (creep.memory.role == 'builder') {
+            Builder.run(creep as CreepBuilder);
+        }
+    }
 }
