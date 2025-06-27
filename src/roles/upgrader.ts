@@ -1,3 +1,4 @@
+import config from "../config";
 
 
 interface CreepUpgrader extends Creep {
@@ -27,9 +28,17 @@ const roleUpgrader = {
         }
 
         if (creep.memory.upgrading) {
-            if (creep.room.controller
-                && creep.upgradeController(creep.room.controller) == ERR_NOT_IN_RANGE) {
-                creep.moveTo(creep.room.controller, { visualizePathStyle: { stroke: '#ffffff' } });
+            if (creep.room.controller) {
+                const res = creep.upgradeController(creep.room.controller);
+                if (res == ERR_NOT_IN_RANGE) {
+                    creep.moveTo(creep.room.controller, { visualizePathStyle: { stroke: '#ffffff' } });
+                } 
+                if (res == OK 
+                    && config.signature 
+                    && (!creep.room.controller.sign 
+                        || creep.room.controller.sign.text != config.signature)) {
+                    creep.signController(creep.room.controller, config.signature);
+                }
             }
         } else {
             const source = creep.pos.findClosestByPath(FIND_SOURCES);

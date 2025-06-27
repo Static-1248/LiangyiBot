@@ -1,6 +1,0 @@
-
-
-
-interface CreepMemory {
-    role: string;
-}
