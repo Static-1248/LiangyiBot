@@ -10,8 +10,10 @@ const roleHarvester = {
 
     /** @param {Creep} creep **/
     run: function(creep: CreepHarvester) {
-	    if(creep.store.getFreeCapacity() > 0
-	       && creep.room.energyCapacityAvailable - creep.room.energyAvailable > 0) {
+
+
+
+	    if(creep.store.getFreeCapacity() > 0) {
             const source = creep.pos.findClosestByPath(FIND_SOURCES);
             if(!source) {
                 console.log('No source found for creep: ' + creep.name);
@@ -25,7 +27,8 @@ const roleHarvester = {
                     filter: (structure) => {
                         return (structure.structureType == STRUCTURE_EXTENSION ||
                                 structure.structureType == STRUCTURE_SPAWN ||
-                                structure.structureType == STRUCTURE_TOWER) && 
+                                structure.structureType == STRUCTURE_TOWER ||
+                                structure.structureType == STRUCTURE_STORAGE) && 
                                 structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
                     }
             });
