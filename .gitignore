@@ -1,5 +1,6 @@
 /dist
 /node_modules
+/screeps_docs_repo
 /config.json
 
 npm-debug.log
