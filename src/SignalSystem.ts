@@ -109,7 +109,7 @@ export class SignalManager {
         if (!connections) return;
 
         // 复制连接数组，防止在执行过程中被修改
-        const connectionsToExecute = [...connections];
+        const connectionsToExecute = connections.slice();
         const connectionsToRemove: SignalConnection[] = [];
 
         for (const connection of connectionsToExecute) {
@@ -180,7 +180,7 @@ export class SignalManager {
      * @param count 获取最近的数量
      */
     public getSignalHistory(count?: number): Signal[] {
-        if (count === undefined) return [...this.signalHistory];
+        if (count === undefined) return this.signalHistory.slice();
         return this.signalHistory.slice(-count);
     }
 

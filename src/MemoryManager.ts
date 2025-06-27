@@ -260,11 +260,10 @@ export class MemoryManager extends SignalEmitter {
         for (const [id, event] of this.timedEvents) {
             if (event.scheduledTime <= currentTime) {
                 // 触发事件
-                signals.emit(event.signal, {
-                    ...event.data,
+                signals.emit(event.signal, Object.assign({}, event.data, {
                     timedEventId: id,
                     executionCount: event.executionCount + 1
-                });
+                }));
 
                 this.emitSignal('memory.timed_event_triggered', {
                     id: event.id,
@@ -300,24 +299,27 @@ export class MemoryManager extends SignalEmitter {
      * 获取pending的GC标记
      */
     public getGCMarkers(): GCMarker[] {
-        return [...this.gcMarkers];
+        return this.gcMarkers.slice();
     }
 
     /**
      * 内存统计信息
      */
     public getMemoryStats(): any {
-        const memoryUsage = JSON.stringify(Memory).length;
-        const creepCount = Object.keys(Memory.creeps).length;
+        // 直接估算内存使用量，避免JSON.stringify可能的问题
+        const creepCount = Object.keys(Memory.creeps || {}).length;
         const timedEventCount = this.timedEvents.size;
         const gcMarkerCount = this.gcMarkers.length;
+        
+        // 粗略估算：每个creep约100字节内存
+        const estimatedMemoryUsage = creepCount * 100 + timedEventCount * 50 + gcMarkerCount * 30;
 
         return {
-            totalMemoryUsage: memoryUsage,
+            totalMemoryUsage: estimatedMemoryUsage,
             creepMemoryCount: creepCount,
             timedEventCount,
             gcMarkerCount,
-            memoryPerCreep: creepCount > 0 ? Math.round(memoryUsage / creepCount) : 0
+            memoryPerCreep: creepCount > 0 ? Math.round(estimatedMemoryUsage / creepCount) : 0
         };
     }
 

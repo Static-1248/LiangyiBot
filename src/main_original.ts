@@ -88,25 +88,9 @@ function initializeSignalSystem(): void {
  */
 function getCreepInstance(creep: Creep): BaseCreep {
     if (!creepInstances[creep.name]) {
-        try {
-            const creepMemory = memory.getCreepMemory(creep.name, { role: 'builder', state: 'idle', born: Game.time });
-            console.log(`🔨 为 ${creep.name} 创建实例，角色: ${creepMemory.role}`);
-            
-            const CreepClass = CREEP_CLASSES[creepMemory.role] || BaseCreep;
-            if (!CreepClass) {
-                console.log(`❌ 找不到角色 ${creepMemory.role} 的类定义`);
-                return new BaseCreep(creep);
-            }
-            
-            creepInstances[creep.name] = new CreepClass(creep);
-            console.log(`✅ 成功创建 ${creep.name} 的实例`);
-            
-        } catch (error) {
-            console.log(`❌ 创建creep实例失败 ${creep.name}:`, error);
-            console.log(`❌ 错误堆栈:`, error.stack);
-            // fallback到基础类
-            creepInstances[creep.name] = new BaseCreep(creep);
-        }
+        const creepMemory = memory.getCreepMemory(creep.name, { role: 'builder', state: 'idle', born: Game.time });
+        const CreepClass = CREEP_CLASSES[creepMemory.role] || BaseCreep;
+        creepInstances[creep.name] = new CreepClass(creep);
     }
     return creepInstances[creep.name];
 }
@@ -330,44 +314,15 @@ function runTowers(room: Room): void {
  * 运行所有Creep
  */
 function runCreeps(): void {
-    const creepCount = Object.keys(Game.creeps).length;
-    if (creepCount === 0) {
-        console.log('⚠️ 没有creep需要运行');
-        return;
-    }
-    
-    let successCount = 0;
-    let errorCount = 0;
-    
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName];
+        const creepInstance = getCreepInstance(creep);
         
         try {
-            const creepInstance = getCreepInstance(creep);
-            if (!creepInstance) {
-                console.log(`❌ 无法创建creep实例: ${creepName}`);
-                errorCount++;
-                continue;
-            }
-            
             creepInstance.run();
-            successCount++;
-            
-            // 每10个tick显示一次creep状态
-            if (Game.time % 10 === 0) {
-                const memory = creepInstance.getMemory();
-                console.log(`🤖 ${creepName}(${memory.role}): 状态=${memory.state}, 能量=${creep.store.energy}/${creep.store.getCapacity()}`);
-            }
-            
         } catch (error) {
-            console.log(`❌ Creep ${creepName} 运行错误:`, error);
-            console.log(`❌ 错误堆栈:`, error.stack);
-            errorCount++;
+            console.log(`Creep ${creepName} 运行错误:`, error);
         }
-    }
-    
-    if (Game.time % 10 === 0) {
-        console.log(`📈 Creep运行统计: 成功=${successCount}, 失败=${errorCount}, 总计=${creepCount}`);
     }
 }
 
@@ -402,111 +357,43 @@ function setupDebugCommands(): void {
  * 主循环
  */
 export function loop(): void {
-    try {
-        console.log(`🔄 Tick ${Game.time} 开始`);
+    // 初始化（只在第一次运行时执行）
+    if (!memory.getGlobalMemory('system.initialized')) {
+        initializeSignalSystem();
+        setupDebugCommands();
+        memory.setGlobalMemory('system.initialized', true);
+    }
+
+    // 运行内存管理器（处理GC和定时事件）
+    memory.run();
+
+    // 生成creep
+    spawnCreeps();
+
+    // 运行房间逻辑
+    runRooms();
+
+    // 运行所有creep
+    runCreeps();
+
+    // 性能统计
+    if (Game.time % 100 === 0) {
+        const stats = memory.getMemoryStats();
+        console.log(`📊 内存统计: ${stats.totalMemoryUsage} 字节, ${stats.creepMemoryCount} 个creep`);
         
-        // 初始化（只在第一次运行时执行）
-        if (!memory.getGlobalMemory('system.initialized')) {
-            console.log('🚀 首次运行，初始化系统...');
-            try {
-                initializeSignalSystem();
-                console.log('✅ 信号系统初始化完成');
-            } catch (error) {
-                console.log('❌ 信号系统初始化失败:', error);
-                throw error;
-            }
-            
-            try {
-                setupDebugCommands();
-                console.log('✅ 调试命令设置完成');
-            } catch (error) {
-                console.log('❌ 调试命令设置失败:', error);
-                throw error;
-            }
-            
-            memory.setGlobalMemory('system.initialized', true);
-            console.log('✅ 系统初始化完成');
-        }
-
-        // 运行内存管理器（处理GC和定时事件）
-        try {
-            memory.run();
-            if (Game.time % 10 === 0) console.log('✅ 内存管理器运行正常');
-        } catch (error) {
-            console.log('❌ 内存管理器运行失败:', error);
-            throw error;
-        }
-
-        // 生成creep
-        try {
-            spawnCreeps();
-            if (Game.time % 10 === 0) console.log('✅ 生成逻辑运行正常');
-        } catch (error) {
-            console.log('❌ 生成逻辑失败:', error);
-            throw error;
-        }
-
-        // 运行房间逻辑
-        try {
-            runRooms();
-            if (Game.time % 10 === 0) console.log('✅ 房间逻辑运行正常');
-        } catch (error) {
-            console.log('❌ 房间逻辑失败:', error);
-            throw error;
-        }
-
-        // 运行所有creep
-        try {
-            runCreeps();
-            if (Game.time % 10 === 0) console.log('✅ Creep逻辑运行正常');
-        } catch (error) {
-            console.log('❌ Creep逻辑失败:', error);
-            throw error;
-        }
-
-        // 性能统计
-        if (Game.time % 100 === 0) {
-            try {
-                const stats = memory.getMemoryStats();
-                console.log(`📊 内存统计: ${stats.totalMemoryUsage} 字节, ${stats.creepMemoryCount} 个creep`);
-                
-                const signalCount = signals.getAllSignals().length;
-                console.log(`📡 信号统计: ${signalCount} 个信号类型`);
-                
-                // 显示各房间creep统计
-                for (const roomName in Game.rooms) {
-                    const room = Game.rooms[roomName];
-                    if (room.controller && room.controller.my) {
-                        const creepStats = getRoomCreepStats(roomName);
-                        const statsStr = Object.entries(creepStats)
-                            .map(([role, count]) => `${role}:${count}`)
-                            .join(' ');
-                        console.log(`🏠 ${roomName}: ${statsStr}`);
-                    }
-                }
-            } catch (error) {
-                console.log('❌ 性能统计失败:', error);
-            }
-        }
+        const signalCount = signals.getAllSignals().length;
+        console.log(`📡 信号统计: ${signalCount} 个信号类型`);
         
-        console.log(`✅ Tick ${Game.time} 完成`);
-        
-    } catch (error) {
-        console.log('💥 主循环致命错误:', error);
-        console.log('错误堆栈:', error.stack);
-        
-        // 尝试恢复基本功能
-        try {
-            console.log('🔄 尝试紧急恢复...');
-            for (const name in Game.creeps) {
-                const creep = Game.creeps[name];
-                if (creep.memory.role === 'upgrader' && creep.store.energy === 0) {
-                    const source = creep.pos.findClosestByPath(FIND_SOURCES);
-                    if (source) creep.moveTo(source);
-                }
+        // 显示各房间creep统计
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (room.controller && room.controller.my) {
+                const creepStats = getRoomCreepStats(roomName);
+                const statsStr = Object.entries(creepStats)
+                    .map(([role, count]) => `${role}:${count}`)
+                    .join(' ');
+                console.log(`🏠 ${roomName}: ${statsStr}`);
             }
-        } catch (recoveryError) {
-            console.log('💀 紧急恢复也失败了:', recoveryError);
         }
     }
 }
