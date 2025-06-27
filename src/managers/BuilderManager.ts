@@ -29,17 +29,23 @@ class BuilderManager {
             if (!builderConfig.enabled) continue;
 
             const constructionSites = room.find(FIND_CONSTRUCTION_SITES);
-            // 如果没有建筑工地，则不需要 Builder
-            if (constructionSites.length === 0) {
-                continue;
-            }
-
             const builders = _.filter(Game.creeps, (creep) =>
                 creep.memory.role === 'builder' && creep.room.name === roomName
             );
 
-            // 如果 Builder 数量不足，则发送信号请求生成
-            if (builders.length < builderConfig.maxCount) {
+            // 修改逻辑：在早期游戏(RCL 1-3)总是保持至少一个builder，即使没有建筑工地
+            // 在中后期游戏(RCL 4+)只有在有建筑工地时才生成builder
+            let shouldSpawnBuilder = false;
+            
+            if (rcl <= 3) {
+                // 早期游戏：总是保持builder，为未来的建造做准备
+                shouldSpawnBuilder = builders.length < builderConfig.maxCount;
+            } else {
+                // 中后期游戏：只有在有建筑工地时才需要builder
+                shouldSpawnBuilder = constructionSites.length > 0 && builders.length < builderConfig.maxCount;
+            }
+
+            if (shouldSpawnBuilder) {
                 signals.emit('spawn.need_builder', {
                     roomName: roomName,
                     current: builders.length,
@@ -49,7 +55,13 @@ class BuilderManager {
                 });
             }
 
-            builders.forEach(creep => this.handleBuilder(creep, constructionSites, rcl));
+            // 只有在有建筑工地时才指挥builder工作，否则让它们待机
+            if (constructionSites.length > 0) {
+                builders.forEach(creep => this.handleBuilder(creep, constructionSites, rcl));
+            } else {
+                // 没有建筑工地时，让builder待机在spawn附近
+                builders.forEach(creep => this.handleIdleBuilder(creep));
+            }
         }
     }
 
@@ -137,6 +149,19 @@ class BuilderManager {
         if (source && creep.harvest(source) === ERR_NOT_IN_RANGE) {
             creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
         }
+    }
+
+    /**
+     * 处理待机的Builder
+     * @param creep - 待机的Builder creep
+     */
+    private handleIdleBuilder(creep: Creep): void {
+        // 移动到spawn附近待机
+        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+        if (spawn && creep.pos.getRangeTo(spawn) > 3) {
+            creep.moveTo(spawn, { visualizePathStyle: { stroke: '#666666' } });
+        }
+        creep.say('💤 待机');
     }
 }
 

@@ -43,9 +43,11 @@ class SpawnManager {
     }
 
     private requestSpawn(role: string, data: SpawnRequestData): void {
-        // 避免重复请求
-        const alreadyInQueue = this.spawnQueue.some(req => req.role === role && req.roomName === data.roomName);
-        if (alreadyInQueue) return;
+        // 修改防重复逻辑：允许同一房间同一角色的多个请求，但限制队列中的总数
+        const sameRoleRequests = this.spawnQueue.filter(req => req.role === role && req.roomName === data.roomName);
+        const maxRequestsPerRole = 3; // 每个角色最多在队列中保持3个请求
+        
+        if (sameRoleRequests.length >= maxRequestsPerRole) return;
 
         this.spawnQueue.push({
             role: role,
@@ -144,11 +146,14 @@ class SpawnManager {
                 this.spawnQueue.splice(requestIndex, 1);
             } else if (result !== ERR_NOT_ENOUGH_ENERGY) {
                 console.log(`[Spawn] 生成 ${request.role} 失败，错误码: ${result}`);
+                // 如果不是能量不足，从队列中移除这个失败的请求
+                this.spawnQueue.splice(requestIndex, 1);
             }
         }
         
-        // 清理过时的请求
-        if(Game.time % 10 === 0) {
+        // 优化队列清理：只在队列过大时清理，而不是定期全部清理
+        if (this.spawnQueue.length > 20) {
+            console.log(`[Spawn] 队列过大(${this.spawnQueue.length})，清理队列`);
             this.spawnQueue = [];
         }
     }
