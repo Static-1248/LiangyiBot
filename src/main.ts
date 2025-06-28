@@ -8,13 +8,26 @@ import { signals } from './SignalSystem';
 import { memory } from './MemoryManager';
 
 // 加载所有管理器，实例化并注册它们的事件监听器
-// 按优先级顺序加载：SpawnManager > SupplierManager > UpgraderManager > HaulerManager > MinerManager > BuilderManager
+// 按优先级顺序加载：SpawnManager > SupplierManager > UpgraderManager > HaulerManager > MinerManager > BuilderManager > SuicideManager
 import './managers/SpawnManager';
 import './managers/SupplierManager';
 import './managers/UpgraderManager';
 import './managers/HaulerManager';
 import './managers/MinerManager';
 import './managers/BuilderManager';
+import './managers/SuicideManager';
+
+// 加载规划器
+import './planners/BuildingPlanner';
+import './planners/HarvestPlanner';
+
+// 导入creep类
+import { SupplierCreep } from './creeps/SupplierCreep';
+import { MinerCreep } from './creeps/MinerCreep';
+import { HaulerCreep } from './creeps/HaulerCreep';
+import { UpgraderCreep } from './creeps/UpgraderCreep';
+import { BuilderCreep } from './creeps/BuilderCreep';
+import { BaseCreep } from './creeps/BaseCreep';
 
 console.log('✅ 核心模块加载完成');
 
@@ -113,6 +126,46 @@ function detectRoomEvents(): void {
 }
 
 /**
+ * 运行creep逻辑 - 创建creep类实例并运行
+ */
+function runCreeps(): void {
+    for (const creepName in Game.creeps) {
+        const creep = Game.creeps[creepName];
+        const role = creep.memory.role;
+        
+        // 根据角色创建对应的creep类实例并运行
+        try {
+            let creepInstance: BaseCreep;
+            
+            switch (role) {
+                case 'supplier':
+                    creepInstance = new SupplierCreep(creep);
+                    break;
+                case 'miner':
+                    creepInstance = new MinerCreep(creep);
+                    break;
+                case 'hauler':
+                    creepInstance = new HaulerCreep(creep);
+                    break;
+                case 'upgrader':
+                    creepInstance = new UpgraderCreep(creep);
+                    break;
+                case 'builder':
+                    creepInstance = new BuilderCreep(creep);
+                    break;
+                default:
+                    creepInstance = new BaseCreep(creep);
+                    break;
+            }
+            
+            creepInstance.run();
+        } catch (error) {
+            console.log(`Error running creep ${creepName}:`, error);
+        }
+    }
+}
+
+/**
  * 检测creep事件
  */
 function detectCreepEvents(): void {
@@ -196,6 +249,9 @@ export function loop(): void {
         
         // 清理死亡creep内存
         cleanupDeadCreeps();
+        
+        // 运行creep逻辑（包含自杀信号处理等）
+        runCreeps();
         
         // 检测各种游戏事件
         detectRoomEvents();

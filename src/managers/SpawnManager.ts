@@ -63,25 +63,51 @@ class SpawnManager {
      * @param role - Creep 角色
      * @param room - 所在房间
      * @param rcl - 房间控制器等级
-     * @returns 身体部件数组
+     * @param isEmergency - 是否为紧急情况（该角色creep数量为0）
+     * @returns 身体部件数组，如果能量不足且非紧急情况则返回null
      */
-    private getBody(role: string, room: Room, rcl: number): BodyPartConstant[] {
+    private getBody(role: string, room: Room, rcl: number, isEmergency: boolean = false): BodyPartConstant[] | null {
         const templates = RCLStrategy.getBodyTemplate(role, rcl);
-        const availableEnergy = room.energyAvailable;
         
-        // 从模板中选择一个适合当前能量的身体配置
-        let selectedTemplate = templates[0]; // 默认使用最小的配置
+        const maxEnergy = room.energyCapacityAvailable;
+        const currentEnergy = room.energyAvailable;
+        
+        // 从模板中选择适合最大能量容量的强力配置
+        let bestTemplate = templates[0]; // 默认使用最小的配置
         
         for (const template of templates) {
             const cost = this.calculateBodyCost(template);
-            if (cost <= availableEnergy) {
-                selectedTemplate = template;
+            if (cost <= maxEnergy) {
+                bestTemplate = template;
             } else {
                 break; // 模板应该按成本递增排序
             }
         }
         
-        return selectedTemplate;
+        const bestTemplateCost = this.calculateBodyCost(bestTemplate);
+        
+        // 如果能量已满，直接使用最强配置
+        if (currentEnergy >= bestTemplateCost) {
+            return bestTemplate;
+        }
+        
+        // 如果不是紧急情况，等待能量充满再生成强力creep
+        if (!isEmergency) {
+            return null; // 返回null表示暂时不生成，等待能量充满
+        }
+        
+        // 紧急情况下，使用当前能量能负担的最强配置
+        let emergencyTemplate = templates[0];
+        for (const template of templates) {
+            const cost = this.calculateBodyCost(template);
+            if (cost <= currentEnergy) {
+                emergencyTemplate = template;
+            } else {
+                break;
+            }
+        }
+        
+        return emergencyTemplate;
     }
 
     /**
@@ -102,6 +128,26 @@ class SpawnManager {
         };
         
         return body.reduce((total, part) => total + (partCosts[part] || 0), 0);
+    }
+
+    /**
+     * 检查某个角色是否处于紧急情况（该角色creep数量为0或即将全部死亡）
+     */
+    private isEmergencySpawn(role: string, roomName: string): boolean {
+        const roomCreeps = _.filter(Game.creeps, creep => 
+            creep.memory.role === role && creep.memory.room === roomName
+        );
+        
+        if (roomCreeps.length === 0) {
+            return true; // 没有该角色的creep
+        }
+        
+        // 检查是否所有该角色creep都即将死亡（小于50 ticks）
+        const dyingCreeps = roomCreeps.filter(creep => 
+            creep.ticksToLive && creep.ticksToLive < 50
+        );
+        
+        return dyingCreeps.length === roomCreeps.length;
     }
 
     /**
@@ -128,7 +174,19 @@ class SpawnManager {
             
             const request = this.spawnQueue[requestIndex];
             
-            const body = this.getBody(request.role, room, request.rcl);
+            // 检查是否为紧急情况
+            const isEmergency = this.isEmergencySpawn(request.role, roomName);
+            
+            const body = this.getBody(request.role, room, request.rcl, isEmergency);
+            
+            // 如果body为null，说明能量不足且非紧急情况，等待能量充满
+            if (!body) {
+                if (Game.time % 50 === 0) { // 每50tick提示一次，避免刷屏
+                    console.log(`[Spawn] 等待能量充满以生成强力 ${request.role} (${room.energyAvailable}/${room.energyCapacityAvailable})`);
+                }
+                continue;
+            }
+            
             const name = `${request.role}-${Game.time}`;
             const memory: CreepMemory = Object.assign({}, request.memory, {
                 role: request.role,
@@ -141,7 +199,10 @@ class SpawnManager {
 
             const result = spawn.spawnCreep(body, name, { memory });
             if (result === OK) {
-                console.log(`[Spawn] 正在生成新的 ${request.role}: ${name} (RCL${request.rcl}, 优先级${request.priority})`);
+                const bodyParts = body.length;
+                const bodyCost = this.calculateBodyCost(body);
+                const emergencyFlag = isEmergency ? ' [紧急]' : '';
+                console.log(`[Spawn] 正在生成新的 ${request.role}: ${name}${emergencyFlag} (${bodyParts}部件, ${bodyCost}能量, RCL${request.rcl})`);
                 // 从队列中移除已处理的请求
                 this.spawnQueue.splice(requestIndex, 1);
             } else if (result !== ERR_NOT_ENOUGH_ENERGY) {

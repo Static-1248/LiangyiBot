@@ -1,16 +1,22 @@
 import { signals } from '../SignalSystem';
 import { RCLStrategy } from './RCLStrategy';
+import { harvestPlanner } from '../planners/HarvestPlanner';
 import _ from 'lodash';
 
 /**
  * 管理供应者 (Supplier) 的行为
  * - 为Spawn和Extension提供能量
  * - 在早期游戏（RCL 1-3）中是最重要的角色
+ * - 使用采集规划器智能分配矿源，避免拥挤
+ * - 支持跨房间挖矿，可以利用相邻房间的矿源
  * - 根据RCL等级调整行为和数量
  */
 class SupplierManager {
     constructor() {
         signals.connect('system.tick_start', null, () => this.run());
+        
+        // 监听矿源分配信号
+        signals.connect('harvest.source_assigned', null, (data: any) => this.handleSourceAssignment(data));
     }
 
     /**
@@ -75,6 +81,9 @@ class SupplierManager {
      * @param creep - Supplier creep
      */
     private doSupply(creep: Creep): void {
+
+        let canSupply = false;
+
         // 优先为Spawn供应能量
         const spawn = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
             filter: (structure) => {
@@ -84,6 +93,7 @@ class SupplierManager {
         });
 
         if (spawn) {
+            canSupply = true;
             if (creep.transfer(spawn, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(spawn, { visualizePathStyle: { stroke: '#ffffff' } });
             }
@@ -99,6 +109,7 @@ class SupplierManager {
         });
 
         if (extension) {
+            canSupply = true;
             if (creep.transfer(extension, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(extension, { visualizePathStyle: { stroke: '#ffffff' } });
             }
@@ -114,8 +125,17 @@ class SupplierManager {
         });
 
         if (tower) {
+            canSupply = true;
             if (creep.transfer(tower, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
                 creep.moveTo(tower, { visualizePathStyle: { stroke: '#ffffff' } });
+            }
+        }
+
+        if (!canSupply) {
+            // 找到任意spawn作为待机位置
+            const anySpawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
+            if (anySpawn) {
+                creep.moveTo(anySpawn, { visualizePathStyle: { stroke: '#ffffff' } }); // 防止creep卡在矿区
             }
         }
     }
@@ -159,7 +179,59 @@ class SupplierManager {
             }
         }
 
-        // 早期游戏或没有容器时：直接从source采集
+        // 早期游戏或没有容器时：使用采集规划器分配矿源
+        this.harvestWithPlanner(creep);
+    }
+
+    /**
+     * 处理矿源分配信号
+     * @param data - 分配数据
+     */
+    private handleSourceAssignment(data: any): void {
+        const creep = Game.creeps[data.creepName];
+        if (creep && creep.memory.role === 'supplier') {
+            creep.memory.assignedSourceId = data.sourceId;
+            console.log(`[SupplierManager] ${data.creepName} 被分配到矿源 ${data.sourceId}`);
+        }
+    }
+
+    /**
+     * 使用采集规划器进行挖矿
+     * @param creep - Supplier creep
+     */
+    private harvestWithPlanner(creep: Creep): void {
+        const assignedSourceId = creep.memory.assignedSourceId;
+        
+        if (assignedSourceId) {
+            // 已分配矿源，前往挖矿
+            const source = safeGetObjectById(assignedSourceId as Id<Source>);
+            if (source) {
+                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+                }
+                return;
+            } else {
+                // 矿源不存在，清除分配并重新请求
+                delete creep.memory.assignedSourceId;
+                harvestPlanner.releaseCreepAssignment(creep.name);
+            }
+        }
+        
+        // 没有分配矿源，请求分配
+        if (!harvestPlanner.getAssignedSource(creep.name)) {
+            signals.emit('harvest.need_source', {
+                creepName: creep.name,
+                roomName: creep.room.name,
+                priority: 3, // supplier优先级较高
+                allowCrossRoom: true // 允许使用相邻房间的矿源
+            });
+            
+            if (Game.time % 20 === 0) { // 每20tick调试一次
+                console.log(`[SupplierManager 调试] ${creep.name} 请求矿源分配`);
+            }
+        }
+        
+        // 在等待分配期间，寻找最近的可用矿源作为临时方案
         const source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
         if (source) {
             if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
@@ -169,4 +241,18 @@ class SupplierManager {
     }
 }
 
-export const supplierManager = new SupplierManager(); 
+export const supplierManager = new SupplierManager();
+
+/**
+ * 安全地通过ID获取对象，处理可能的失效ID
+ */
+function safeGetObjectById<T extends _HasId>(id: Id<T> | undefined): T | null {
+    if (!id) return null;
+    
+    try {
+        return Game.getObjectById(id);
+    } catch (error) {
+        console.log(`[SupplierManager] 无法找到对象 ID: ${id}`);
+        return null;
+    }
+} 

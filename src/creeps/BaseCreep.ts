@@ -35,6 +35,7 @@ export class BaseCreep extends SignalEmitter {
         this.defineSignal('creep.task_completed');
         this.defineSignal('creep.state_changed');
         this.defineSignal('creep.died');
+        this.defineSignal('creep.suicide');
 
         // 获取或初始化内存
         this.creepMemory = memory.getCreepMemory(creep.name, {
@@ -157,23 +158,48 @@ export class BaseCreep extends SignalEmitter {
     }
 
     /**
+     * 安全地通过ID获取对象，处理可能的失效ID
+     * @param id 对象ID
+     * @returns 对象实例或null
+     */
+    protected safeGetObjectById<T extends _HasId>(id: Id<T> | undefined): T | null {
+        if (!id) return null;
+        
+        try {
+            return Game.getObjectById(id);
+        } catch (error) {
+            console.log(`[BaseCreep] ${this.creep.name} 无法找到对象 ID: ${id}`);
+            return null;
+        }
+    }
+
+    /**
      * 检查能量状态
      */
     public checkEnergyStatus(): void {
-        const energyRatio = this.creep.store.energy / this.creep.store.getCapacity(RESOURCE_ENERGY);
+        // 如果creep即将死亡或已经死亡，不检查能量状态
+        if (!this.creep || this.creep.ticksToLive === 0) {
+            return;
+        }
         
-        if (energyRatio >= 1.0 && this.creepMemory.lastAction !== 'energy_full') {
-            this.updateMemory({ lastAction: 'energy_full' });
-            this.emitSignal('creep.energy_full', {
-                creep: this.creep,
-                energy: this.creep.store.energy
-            });
-        } else if (energyRatio <= 0 && this.creepMemory.lastAction !== 'energy_empty') {
-            this.updateMemory({ lastAction: 'energy_empty' });
-            this.emitSignal('creep.energy_empty', {
-                creep: this.creep,
-                capacity: this.creep.store.getCapacity(RESOURCE_ENERGY)
-            });
+        try {
+            const energyRatio = this.creep.store.energy / this.creep.store.getCapacity(RESOURCE_ENERGY);
+            
+            if (energyRatio >= 1.0 && this.creepMemory.lastAction !== 'energy_full') {
+                this.updateMemory({ lastAction: 'energy_full' });
+                this.emitSignal('creep.energy_full', {
+                    creep: this.creep,
+                    energy: this.creep.store.energy
+                });
+            } else if (energyRatio <= 0 && this.creepMemory.lastAction !== 'energy_empty') {
+                this.updateMemory({ lastAction: 'energy_empty' });
+                this.emitSignal('creep.energy_empty', {
+                    creep: this.creep,
+                    capacity: this.creep.store.getCapacity(RESOURCE_ENERGY)
+                });
+            }
+        } catch (error) {
+            console.log(`[BaseCreep] ${this.creep.name} checkEnergyStatus error:`, error);
         }
     }
 
@@ -182,6 +208,19 @@ export class BaseCreep extends SignalEmitter {
      */
     public say(message: string, sayPublic?: boolean): ScreepsReturnCode {
         return this.creep.say(message, sayPublic);
+    }
+
+    /**
+     * 自杀
+     */
+    public suicide(): ScreepsReturnCode {
+        const result = this.creep.suicide();
+        if (result === OK) {
+            this.emitSignal('creep.suicide', {
+                creep: this.creep
+            });
+        }
+        return result;
     }
 
     /**
@@ -213,7 +252,7 @@ export class BaseCreep extends SignalEmitter {
     @signal('creep.energy_full', 10)
     protected onEnergyFull(data: any): void {
         // 子类可以重写此方法
-        this.say('⚡满能量!');
+        // 移除默认说话，让子类决定
     }
 
     /**
@@ -222,7 +261,21 @@ export class BaseCreep extends SignalEmitter {
     @signal('creep.energy_empty', 10)
     protected onEnergyEmpty(data: any): void {
         // 子类可以重写此方法
-        this.say('🔋需要能量');
+        // 移除默认说话，让子类决定
+    }
+
+    /**
+     * 信号监听器：接收自杀指令
+     */
+    @signal('creep.should_suicide', 5)
+    protected onShouldSuicide(data: { creepName: string, reason: string, stats?: string }): void {
+        // 只有当信号是针对自己时才自杀
+        if (data.creepName === this.creep.name || data.creepName === 'all') {
+            console.log(`🗡️ ${this.creep.name} 收到自杀指令: ${data.reason} ${data.stats || ''}`);
+            this.say('💀 自杀');
+            this.suicide();
+        }
+        // 移除了不相关creep的日志输出，避免日志刷屏
     }
 
     /**

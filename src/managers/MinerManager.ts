@@ -1,11 +1,13 @@
 import { signals } from '../SignalSystem';
 import { RCLStrategy } from './RCLStrategy';
+import { harvestPlanner } from '../planners/HarvestPlanner';
 import _ from 'lodash';
 
 /**
  * 管理矿工 (Miner) 的行为
  * - 只在RCL 4+时启用（有容器系统时）
- * - 为每个能量源分配一个 Miner
+ * - 为每个能量源分配一个 Miner（站桩挖矿）
+ * - 使用采集规划器检查矿源位置是否已满
  * - 在需要时请求生成新的 Miner
  * - 指挥 Miner 前往指定能量源并开采
  * - 将能量存入附近的容器
@@ -54,7 +56,11 @@ class MinerManager {
                 const hasContainer = this.hasContainerNearSource(source);
                 const hasContainerSite = this.hasContainerSiteNearSource(source);
                 
-                if ((hasContainer || hasContainerSite) && assignedMiners.length < 1) {
+                // 使用采集规划器检查矿源是否已满
+                const isSourceFull = harvestPlanner.isSourceFull(source.id);
+                
+                // 如果有容器且矿源位置未满且当前没有分配的miner，则请求生成miner
+                if ((hasContainer || hasContainerSite) && !isSourceFull && assignedMiners.length < 1) {
                     signals.emit('spawn.need_miner', {
                         roomName: roomName,
                         current: miners.length,
@@ -63,6 +69,9 @@ class MinerManager {
                         memory: { sourceId: source.id },
                         rcl: rcl
                     });
+                } else if (isSourceFull && Game.time % 100 === 0) {
+                    // 每100tick提示一次矿源已满的情况
+                    console.log(`[MinerManager] 矿源 ${source.id} 在 ${roomName} 位置已满，暂不派遣miner`);
                 }
             }
             
@@ -105,7 +114,7 @@ class MinerManager {
             return;
         }
         
-        const source = Game.getObjectById(sourceId);
+        const source = safeGetObjectById(sourceId);
         if (!source) {
             console.log(`${creep.name} cannot find its source ${sourceId}!`);
             delete creep.memory.sourceId;
@@ -142,4 +151,18 @@ class MinerManager {
     }
 }
 
-export const minerManager = new MinerManager(); 
+export const minerManager = new MinerManager();
+
+/**
+ * 安全地通过ID获取对象，处理可能的失效ID
+ */
+function safeGetObjectById<T extends _HasId>(id: Id<T> | undefined): T | null {
+    if (!id) return null;
+    
+    try {
+        return Game.getObjectById(id);
+    } catch (error) {
+        console.log(`[MinerManager] 无法找到对象 ID: ${id}`);
+        return null;
+    }
+} 

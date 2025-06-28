@@ -24,6 +24,7 @@ export class SignalManager {
     private connections: Map<string, SignalConnection[]> = new Map();
     private signalHistory: Signal[] = [];
     private maxHistorySize = 1000;
+    private debugMode = false;
 
     private constructor() {}
 
@@ -106,18 +107,66 @@ export class SignalManager {
         }
 
         const connections = this.connections.get(signal);
-        if (!connections) return;
+        if (!connections) {
+            // 调试：显示没有监听器的信号
+            if (this.debugMode) {
+                console.log(`📡 信号 "${signal}" 发射但无监听器 [数据: ${data ? JSON.stringify(data).substring(0, 50) : 'none'}]`);
+            }
+            return;
+        }
+
+        // 调试：显示信号发射和监听器信息
+        if (this.debugMode) {
+            const senderInfo = this.getCallerInfo();
+            console.log(`📡 [${Game.time}] 信号 "${signal}" 发射`);
+            console.log(`   发射者: ${senderInfo}`);
+            console.log(`   监听器数量: ${connections.length}`);
+            if (data) {
+                const dataStr = JSON.stringify(data).substring(0, 100);
+                console.log(`   数据: ${dataStr}${dataStr.length >= 100 ? '...' : ''}`);
+            }
+        }
 
         // 复制连接数组，防止在执行过程中被修改
         const connectionsToExecute = connections.slice();
         const connectionsToRemove: SignalConnection[] = [];
 
-        for (const connection of connectionsToExecute) {
+        for (let i = 0; i < connectionsToExecute.length; i++) {
+            const connection = connectionsToExecute[i];
+            const startTime = Game.cpu.getUsed();
+            
             try {
+                if (this.debugMode) {
+                    let targetName = 'null';
+                    let methodName = 'function';
+                    
+                    try {
+                        if (connection.target) {
+                            targetName = connection.target.constructor?.name || 'unknown';
+                        }
+                        if (typeof connection.method === 'string') {
+                            methodName = connection.method;
+                        } else if (typeof connection.method === 'function') {
+                            methodName = connection.method.name || 'anonymous';
+                        }
+                    } catch (e) {
+                        targetName = 'error';
+                    }
+                    
+                    console.log(`   → [${i + 1}] ${targetName}.${methodName} (优先级: ${connection.priority || 0})`);
+                }
+
                 if (typeof connection.method === 'function') {
                     connection.method.call(connection.target, data);
                 } else if (typeof connection.method === 'string' && connection.target[connection.method]) {
                     connection.target[connection.method](data);
+                }
+
+                if (this.debugMode) {
+                    const cpuUsed = Game.cpu.getUsed() - startTime;
+                    if (cpuUsed > 0.1) { // 只显示CPU消耗大于0.1的处理器
+                        console.log(`     ⚡ CPU: ${cpuUsed.toFixed(3)}`);
+                    }
                 }
 
                 // 如果是一次性连接，标记为删除
@@ -125,8 +174,17 @@ export class SignalManager {
                     connectionsToRemove.push(connection);
                 }
             } catch (error) {
-                console.log(`信号 ${signal} 执行错误:`, error);
+                console.log(`❌ 信号 "${signal}" 执行错误:`, error);
+                if (this.debugMode) {
+                    const targetName = connection.target ? connection.target.constructor.name : 'null';
+                    const methodName = typeof connection.method === 'string' ? connection.method : 'function';
+                    console.log(`   错误发生在: ${targetName}.${methodName}`);
+                }
             }
+        }
+
+        if (this.debugMode && connections.length > 0) {
+            console.log(`   ✅ 信号 "${signal}" 处理完成`);
         }
 
         // 移除一次性连接
@@ -193,11 +251,59 @@ export class SignalManager {
     }
 
     /**
+     * 获取调用者信息
+     */
+    private getCallerInfo(): string {
+        try {
+            const stack = new Error().stack;
+            if (!stack) return 'unknown';
+            
+            const lines = stack.split('\n');
+            // 跳过 Error, getCallerInfo, emit 这几层
+            for (let i = 3; i < Math.min(lines.length, 8); i++) {
+                const line = lines[i];
+                if (line && !line.includes('SignalManager') && !line.includes('SignalEmitter')) {
+                    // 提取函数名和文件信息
+                    const match = line.match(/at\s+(.+?)\s+\(.*[/\\]([^/\\]+\.ts):\d+/);
+                    if (match) {
+                        return `${match[1]} (${match[2]})`;
+                    }
+                    
+                    // 简化格式
+                    const simpleMatch = line.match(/at\s+(.+)/);
+                    if (simpleMatch) {
+                        return simpleMatch[1].trim();
+                    }
+                }
+            }
+            return 'unknown caller';
+        } catch (error) {
+            return 'caller info error';
+        }
+    }
+
+    /**
+     * 启用/禁用调试模式
+     */
+    public setDebugMode(enabled: boolean): void {
+        this.debugMode = enabled;
+        console.log(`📡 信号系统调试模式: ${enabled ? '启用' : '禁用'}`);
+    }
+
+    /**
+     * 获取调试模式状态
+     */
+    public isDebugMode(): boolean {
+        return this.debugMode;
+    }
+
+    /**
      * 调试信息
      */
     public debugInfo(): void {
         console.log('=== 信号系统调试信息 ===');
         console.log(`总信号数: ${this.connections.size}`);
+        console.log(`调试模式: ${this.debugMode ? '启用' : '禁用'}`);
         for (const [signal, connections] of this.connections) {
             console.log(`信号 "${signal}": ${connections.length} 个连接`);
             connections.forEach((conn, index) => {
@@ -209,6 +315,15 @@ export class SignalManager {
 
 // 全局信号管理器实例
 export const signals = SignalManager.getInstance();
+
+// 全局调试函数，方便在控制台中使用
+(global as any).enableSignalDebug = (enabled: boolean = true) => {
+    signals.setDebugMode(enabled);
+};
+
+(global as any).signalDebugInfo = () => {
+    signals.debugInfo();
+};
 
 // 信号装饰器 - 用于自动连接信号
 export function signal(signalName: string, priority = 0) {

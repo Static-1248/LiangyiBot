@@ -37,7 +37,7 @@ export class SupplierCreep extends BaseCreep {
     }
 
     /**
-     * 寻找优先交付目标（重写父类方法）
+     * 寻找优先交付目标（优化版本）
      */
     public findDeliveryTarget(): Structure | null {
         // 优先级: spawn > extension > tower
@@ -51,7 +51,7 @@ export class SupplierCreep extends BaseCreep {
         }) as StructureSpawn[];
 
         if (spawns.length > 0) {
-            const spawn = this.creep.pos.findClosestByPath(spawns);
+            const spawn = this.creep.pos.findClosestByRange(spawns); // 使用Range而不是Path
             if (spawn) return spawn;
         }
 
@@ -65,7 +65,7 @@ export class SupplierCreep extends BaseCreep {
 
         if (extensions.length > 0) {
             // 按距离排序，优先供给最近的
-            const extension = this.creep.pos.findClosestByPath(extensions);
+            const extension = this.creep.pos.findClosestByRange(extensions); // 使用Range而不是Path
             if (extension) return extension;
         }
 
@@ -78,7 +78,7 @@ export class SupplierCreep extends BaseCreep {
         }) as StructureTower[];
 
         if (towers.length > 0) {
-            const tower = this.creep.pos.findClosestByPath(towers);
+            const tower = this.creep.pos.findClosestByRange(towers); // 使用Range而不是Path
             if (tower) return tower;
         }
 
@@ -86,7 +86,7 @@ export class SupplierCreep extends BaseCreep {
     }
 
     /**
-     * 寻找最佳能量来源
+     * 寻找最佳能量来源（优化版本）
      */
     public findBestEnergySource(): Structure | Source | null {
         // 优先从容器获取能量
@@ -119,7 +119,7 @@ export class SupplierCreep extends BaseCreep {
         });
 
         if (sources.length > 0) {
-            return this.creep.pos.findClosestByPath(sources);
+            return this.creep.pos.findClosestByRange(sources); // 使用Range而不是Path
         }
 
         return null;
@@ -133,30 +133,51 @@ export class SupplierCreep extends BaseCreep {
     }
 
     /**
-     * 检查能量危机
+     * 检查能量危机（防重复发射）
      */
     private checkEnergyCrisis(): void {
+        // 只有主要供给者才检查能量危机，避免重复信号
+        if (!this.isPrimarySupplier()) return;
+        
         const room = this.creep.room;
         const energyAvailable = room.energyAvailable;
         const energyCapacity = room.energyCapacityAvailable;
+        const energyRatio = energyAvailable / energyCapacity;
         
-        // 如果可用能量低于20%，触发能量危机信号
-        if (energyAvailable < energyCapacity * 0.2) {
-            this.emitSignal('supplier.energy_crisis', {
-                creep: this.creep,
-                roomName: room.name,
-                energyAvailable,
-                energyCapacity,
-                crisisLevel: 'critical'
-            });
-        } else if (energyAvailable < energyCapacity * 0.5) {
-            this.emitSignal('supplier.energy_crisis', {
-                creep: this.creep,
-                roomName: room.name,
-                energyAvailable,
-                energyCapacity,
-                crisisLevel: 'warning'
-            });
+        // 使用Memory缓存上次危机状态，避免重复发射
+        const roomMemory = room.memory as any;
+        if (!roomMemory.lastEnergyCrisisCheck) {
+            roomMemory.lastEnergyCrisisCheck = {
+                tick: Game.time,
+                level: 'normal'
+            };
+        }
+        
+        const lastCheck = roomMemory.lastEnergyCrisisCheck;
+        let currentLevel = 'normal';
+        
+        if (energyRatio < 0.2) {
+            currentLevel = 'critical';
+        } else if (energyRatio < 0.5) {
+            currentLevel = 'warning';
+        }
+        
+        // 只有危机级别变化或者距离上次检查超过50tick才发射信号
+        if (currentLevel !== lastCheck.level || Game.time - lastCheck.tick > 50) {
+            if (currentLevel !== 'normal') {
+                this.emitSignal('supplier.energy_crisis', {
+                    creep: this.creep,
+                    roomName: room.name,
+                    energyAvailable,
+                    energyCapacity,
+                    crisisLevel: currentLevel,
+                    energyRatio: Math.round(energyRatio * 100)
+                });
+            }
+            
+            // 更新检查记录
+            lastCheck.tick = Game.time;
+            lastCheck.level = currentLevel;
         }
     }
 
@@ -185,7 +206,7 @@ export class SupplierCreep extends BaseCreep {
     public doPickup(): boolean {
         if (!this.creepMemory.pickupTarget) return false;
 
-        const target = Game.getObjectById(this.creepMemory.pickupTarget);
+        const target = this.safeGetObjectById(this.creepMemory.pickupTarget);
         if (!target) {
             this.creepMemory.pickupTarget = undefined;
             return false;
@@ -197,7 +218,6 @@ export class SupplierCreep extends BaseCreep {
         if (target instanceof Source) {
             const result = this.creep.harvest(target);
             if (result === OK) {
-                this.say('⛏️采集中');
                 return true;
             } else if (result === ERR_NOT_IN_RANGE) {
                 this.moveTo(target);
@@ -216,7 +236,6 @@ export class SupplierCreep extends BaseCreep {
         const result = this.creep.withdraw(target as any, resourceType);
         
         if (result === OK) {
-            this.say('📥拾取中');
             return true;
         } else if (result === ERR_NOT_IN_RANGE) {
             this.moveTo(target);
@@ -235,7 +254,7 @@ export class SupplierCreep extends BaseCreep {
     public doDelivery(): boolean {
         if (!this.creepMemory.deliveryTarget) return false;
 
-        const target = Game.getObjectById(this.creepMemory.deliveryTarget);
+        const target = this.safeGetObjectById(this.creepMemory.deliveryTarget);
         if (!target) {
             this.creepMemory.deliveryTarget = undefined;
             return false;
@@ -252,8 +271,6 @@ export class SupplierCreep extends BaseCreep {
         const result = this.creep.transfer(target as any, resourceType);
         
         if (result === OK) {
-            this.say('📤交付中');
-            
             // 发射特定的供给信号
             if (target.structureType === STRUCTURE_SPAWN) {
                 this.emitSignal('supplier.spawn_supplied', {
@@ -299,7 +316,7 @@ export class SupplierCreep extends BaseCreep {
     }
 
     /**
-     * 重写主要工作逻辑
+     * 重写主要工作逻辑（优化版本）
      */
     protected doWork(): void {
         // 定期检查能量危机
@@ -307,33 +324,125 @@ export class SupplierCreep extends BaseCreep {
             this.checkEnergyCrisis();
         }
 
-        // 如果房间需要紧急供给，设置高优先级
-        if (this.needsUrgentSupply()) {
-            this.say('🚨紧急!');
-        }
+        // 检查当前目标是否仍然有效
+        this.validateCurrentTargets();
 
-        // 如果当前没有任务且房间需要能量，创建供给任务
-        if (!this.creepMemory.currentTask && this.getRoomEnergyDemand() > 0) {
-            const source = this.findPickupTarget();
-            const target = this.findDeliveryTarget();
-            
-            if (source && target) {
-                // 创建内部供给任务
-                this.creepMemory.pickupTarget = source.id;
-                this.creepMemory.deliveryTarget = target.id;
-                this.creepMemory.resourceType = RESOURCE_ENERGY;
-                this.setState('picking_up');
-            } else if (!target) {
+        // 状态切换逻辑：如果正在交付但没有资源，切换到拾取
+        if (this.creepMemory.state === 'delivering' && this.creep.store.energy === 0) {
+            this.setState('picking_up');
+            this.say('📥去拾取');
+            // 不立即清空deliveryTarget，让它在下次交付时重用（如果仍然有效）
+        }
+        // 状态切换逻辑：如果正在拾取但满载，切换到交付
+        else if (this.creepMemory.state === 'picking_up' && this.creep.store.getFreeCapacity() === 0) {
+            this.setState('delivering');
+            this.say('📤去交付');
+            // 不立即清空pickupTarget，让它在下次拾取时重用（如果仍然有效）
+        }
+        // 初始状态：如果没有状态，根据能量情况设置初始状态
+        else if (!this.creepMemory.state || this.creepMemory.state === 'idle') {
+            if (this.getRoomEnergyDemand() === 0) {
                 // 没有需要供给的目标，完成供给
                 this.completeSupply();
                 this.setState('idle');
                 this.say('✅供给完成');
                 return;
+            } else if (this.creep.store.energy === 0) {
+                this.setState('picking_up');
+            } else {
+                this.setState('delivering');
             }
         }
 
-        // 调用父类的工作逻辑
-        super.doWork();
+        // 根据当前状态执行对应任务
+        if (this.creepMemory.state === 'picking_up') {
+            // 验证并获取拾取目标
+            if (!this.hasValidPickupTarget()) {
+                const source = this.findPickupTarget();
+                if (source) {
+                    this.creepMemory.pickupTarget = source.id;
+                    this.creepMemory.resourceType = RESOURCE_ENERGY;
+                } else {
+                    this.say('❓找不到能量源');
+                    return;
+                }
+            }
+            
+            if (!this.doPickup()) {
+                // 如果拾取失败，清空目标重新寻找
+                this.creepMemory.pickupTarget = undefined;
+            }
+        } else if (this.creepMemory.state === 'delivering') {
+            // 验证并获取交付目标
+            if (!this.hasValidDeliveryTarget()) {
+                const target = this.findDeliveryTarget();
+                if (target) {
+                    this.creepMemory.deliveryTarget = target.id;
+                    this.creepMemory.resourceType = RESOURCE_ENERGY;
+                } else {
+                    this.say('❓找不到交付目标');
+                    return;
+                }
+            }
+            
+            if (!this.doDelivery()) {
+                // 如果交付失败，清空目标重新寻找
+                this.creepMemory.deliveryTarget = undefined;
+            }
+        }
+    }
+
+    /**
+     * 验证当前目标是否有效
+     */
+    private validateCurrentTargets(): void {
+        // 验证拾取目标
+        if (this.creepMemory.pickupTarget) {
+            const target = this.safeGetObjectById(this.creepMemory.pickupTarget);
+            if (!target || (target instanceof Source && target.energy === 0) || 
+                ('store' in target && target.store && (target.store as any).energy === 0)) {
+                this.creepMemory.pickupTarget = undefined;
+            }
+        }
+
+        // 验证交付目标
+        if (this.creepMemory.deliveryTarget) {
+            const target = this.safeGetObjectById(this.creepMemory.deliveryTarget);
+            if (!target || ('store' in target && target.store && 
+                (target.store as any).getFreeCapacity(RESOURCE_ENERGY) === 0)) {
+                this.creepMemory.deliveryTarget = undefined;
+            }
+        }
+    }
+
+    /**
+     * 检查是否有有效的拾取目标
+     */
+    private hasValidPickupTarget(): boolean {
+        if (!this.creepMemory.pickupTarget) return false;
+        
+        const target = this.safeGetObjectById(this.creepMemory.pickupTarget);
+        if (!target) return false;
+        
+        if (target instanceof Source) {
+            return target.energy > 0;
+        } else if ('store' in target && target.store) {
+            return (target.store as any).energy > 0;
+        }
+        
+        return false;
+    }
+
+    /**
+     * 检查是否有有效的交付目标
+     */
+    private hasValidDeliveryTarget(): boolean {
+        if (!this.creepMemory.deliveryTarget) return false;
+        
+        const target = this.safeGetObjectById(this.creepMemory.deliveryTarget);
+        if (!target || !('store' in target) || !target.store) return false;
+        
+        return (target.store as any).getFreeCapacity(RESOURCE_ENERGY) > 0;
     }
 
     /**

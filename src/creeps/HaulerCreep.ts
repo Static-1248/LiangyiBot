@@ -53,7 +53,7 @@ export class HaulerCreep extends BaseCreep {
     public doPickup(): boolean {
         if (!this.creepMemory.pickupTarget) return false;
 
-        const target = Game.getObjectById(this.creepMemory.pickupTarget);
+        const target = this.safeGetObjectById(this.creepMemory.pickupTarget);
         if (!target) {
             this.creepMemory.pickupTarget = undefined;
             return false;
@@ -71,8 +71,6 @@ export class HaulerCreep extends BaseCreep {
         const result = this.creep.withdraw(target as any, resourceType);
         
         if (result === OK) {
-            this.say('📥拾取中');
-            
             // 检查是否拾取完毕
             if (this.creep.store.getFreeCapacity() === 0) {
                 this.completePickup();
@@ -96,7 +94,7 @@ export class HaulerCreep extends BaseCreep {
     public doDelivery(): boolean {
         if (!this.creepMemory.deliveryTarget) return false;
 
-        const target = Game.getObjectById(this.creepMemory.deliveryTarget);
+        const target = this.safeGetObjectById(this.creepMemory.deliveryTarget);
         if (!target) {
             this.creepMemory.deliveryTarget = undefined;
             return false;
@@ -113,8 +111,6 @@ export class HaulerCreep extends BaseCreep {
         const result = this.creep.transfer(target as any, resourceType);
         
         if (result === OK) {
-            this.say('📤交付中');
-            
             // 检查是否交付完毕
             if (this.creep.store[resourceType] === 0) {
                 this.completeDelivery();
@@ -270,6 +266,7 @@ export class HaulerCreep extends BaseCreep {
         if (this.creep.store.energy > 0) {
             if (this.creepMemory.state !== 'delivering') {
                 this.setState('delivering');
+                this.say('📤去交付');
                 
                 if (!this.creepMemory.deliveryTarget) {
                     const target = this.findDeliveryTarget();
@@ -285,6 +282,7 @@ export class HaulerCreep extends BaseCreep {
             // 如果没有资源，寻找拾取目标
             if (this.creepMemory.state !== 'picking_up') {
                 this.setState('picking_up');
+                this.say('📥去拾取');
                 
                 if (!this.creepMemory.pickupTarget) {
                     const target = this.findPickupTarget();

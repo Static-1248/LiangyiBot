@@ -75,7 +75,7 @@ export class UpgraderCreep extends BaseCreep {
      */
     public getUpgradeTarget(): StructureController | null {
         if (this.creepMemory.upgradeTarget) {
-            const target = Game.getObjectById(this.creepMemory.upgradeTarget);
+            const target = this.safeGetObjectById(this.creepMemory.upgradeTarget);
             if (target && target.my) return target;
         }
 
@@ -109,8 +109,6 @@ export class UpgraderCreep extends BaseCreep {
 
         const result = this.creep.upgradeController(target);
         if (result === OK) {
-            this.say('⬆️升级中');
-            
             // 检查是否升级成功
             if (target.progress === 0) {
                 this.emitSignal('upgrader.controller_upgraded', {
@@ -144,8 +142,6 @@ export class UpgraderCreep extends BaseCreep {
         }
 
         if (result === OK) {
-            this.say('⛏️采集中');
-            
             // 如果在容器附近，发射信号
             if (source instanceof Structure && source.structureType === STRUCTURE_CONTAINER) {
                 this.emitSignal('upgrader.at_container', {
@@ -167,7 +163,7 @@ export class UpgraderCreep extends BaseCreep {
      */
     private getEnergySource(): Source | Structure | null {
         if (this.creepMemory.energySource) {
-            const source = Game.getObjectById(this.creepMemory.energySource);
+            const source = this.safeGetObjectById(this.creepMemory.energySource);
             if (source) {
                 if (source instanceof Source && source.energy > 0) return source;
                 if (source instanceof Structure && 'store' in source && (source as any).store.energy > 0) return source;
@@ -231,31 +227,45 @@ export class UpgraderCreep extends BaseCreep {
      * 主要工作逻辑
      */
     protected doWork(): void {
-        // 升级是第一优先级，如果有能量就去升级
-        if (this.creep.store.energy > 0) {
-            if (this.creepMemory.state !== 'upgrading') {
+        // 状态切换逻辑：如果正在升级但能量空了，切换到采集
+        if (this.creepMemory.state === 'upgrading' && this.creep.store.energy === 0) {
+            this.setState('harvesting');
+            this.say('🔋去采集');
+            this.emitSignal('upgrader.seeking_energy', { creep: this.creep });
+        }
+        // 状态切换逻辑：如果正在采集但能量满了，切换到升级
+        else if (this.creepMemory.state === 'harvesting' && this.creep.store.getFreeCapacity() === 0) {
+            this.setState('upgrading');
+            this.say('⬆️去升级');
+            this.emitSignal('upgrader.started_upgrading', { 
+                creep: this.creep,
+                controller: this.getUpgradeTarget()
+            });
+        }
+        // 初始状态：如果没有状态，根据能量情况设置初始状态
+        else if (!this.creepMemory.state || this.creepMemory.state === 'idle') {
+            if (this.creep.store.energy === 0) {
+                this.setState('harvesting');
+                this.emitSignal('upgrader.seeking_energy', { creep: this.creep });
+            } else {
                 this.setState('upgrading');
                 this.emitSignal('upgrader.started_upgrading', { 
                     creep: this.creep,
                     controller: this.getUpgradeTarget()
                 });
             }
-            
+        }
+
+        // 根据当前状态执行对应任务
+        if (this.creepMemory.state === 'upgrading') {
             // 检查控制器容器情况
             if (Game.time % 50 === 0) {
                 this.checkControllerContainer();
             }
-            
             this.doUpgrade();
-            return;
+        } else if (this.creepMemory.state === 'harvesting') {
+            this.doHarvest();
         }
-
-        // 如果没有能量，去采集
-        if (this.creepMemory.state !== 'harvesting') {
-            this.setState('harvesting');
-            this.emitSignal('upgrader.seeking_energy', { creep: this.creep });
-        }
-        this.doHarvest();
     }
 
     /**

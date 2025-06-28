@@ -100,14 +100,14 @@ export class RCLStrategy {
     }
 
     /**
-     * 获取指定角色和RCL的身体部件模板
+     * 获取指定角色的身体部件模板
      * @param role - creep角色
-     * @param rcl - 房间控制器等级
+     * @param rcl - 房间控制器等级（保留参数兼容性，但不影响身体配置）
      * @returns 身体部件模板数组
      */
     static getBodyTemplate(role: string, rcl: number): BodyPartConstant[][] {
-        // 根据RCL等级确定不同的能量预算
-        const energyBudgets = this.getEnergyBudgets(rcl);
+        // 标准化的能量预算数组（不依赖RCL）
+        const energyBudgets = [200, 300, 550, 800, 1300, 1800, 2300];
         const templates: BodyPartConstant[][] = [];
         
         for (const budget of energyBudgets) {
@@ -121,16 +121,14 @@ export class RCLStrategy {
     }
 
     /**
-     * 根据RCL等级获取能量预算数组
+     * 根据RCL等级获取能量预算数组（已废弃，保留兼容性）
      * @param rcl - 房间控制器等级
      * @returns 能量预算数组（从小到大）
+     * @deprecated 身体配置现在只依赖于可用能量，不依赖RCL
      */
     private static getEnergyBudgets(rcl: number): number[] {
-        if (rcl <= 2) return [200, 300];
-        if (rcl <= 3) return [200, 300, 550];
-        if (rcl <= 4) return [300, 550, 800];
-        if (rcl <= 6) return [550, 800, 1300];
-        return [800, 1300, 1800, 2300];
+        // 返回标准化的能量预算，不再依赖RCL
+        return [200, 300, 550, 800, 1300, 1800, 2300];
     }
 
     /**

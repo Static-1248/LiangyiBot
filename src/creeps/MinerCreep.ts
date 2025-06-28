@@ -40,7 +40,7 @@ export class MinerCreep extends BaseCreep {
      */
     public getAssignedSource(): Source | null {
         if (this.creepMemory.sourceId) {
-            const source = Game.getObjectById(this.creepMemory.sourceId);
+            const source = this.safeGetObjectById(this.creepMemory.sourceId);
             if (source) return source;
         }
         return null;
@@ -146,7 +146,7 @@ export class MinerCreep extends BaseCreep {
      */
     public getContainer(): StructureContainer | null {
         if (this.creepMemory.containerId) {
-            const container = Game.getObjectById(this.creepMemory.containerId);
+            const container = this.safeGetObjectById(this.creepMemory.containerId);
             if (container) return container;
             this.creepMemory.containerId = undefined;
         }
@@ -156,7 +156,7 @@ export class MinerCreep extends BaseCreep {
         if (source) {
             this.setupContainer();
             if (this.creepMemory.containerId) {
-                return Game.getObjectById(this.creepMemory.containerId);
+                return this.safeGetObjectById(this.creepMemory.containerId);
             }
         }
 
@@ -177,15 +177,12 @@ export class MinerCreep extends BaseCreep {
                 source: source,
                 regenTime: source.ticksToRegeneration
             });
-            this.say(`💤${source.ticksToRegeneration || '?'}`);
             return false;
         }
 
         const result = this.creep.harvest(source);
         
         if (result === OK) {
-            this.say('⛏️挖矿中');
-            
             // 检查容器是否满了
             const container = this.getContainer();
             if (container && container.store.getFreeCapacity() === 0) {
@@ -247,7 +244,6 @@ export class MinerCreep extends BaseCreep {
         const result = this.creep.transfer(container, RESOURCE_ENERGY);
         
         if (result === OK) {
-            this.say('📦存储中');
             return true;
         } else if (result === ERR_NOT_IN_RANGE) {
             this.moveTo(container);
@@ -275,7 +271,6 @@ export class MinerCreep extends BaseCreep {
                 this.assignSource(source);
                 this.setState('assigned');
             } else {
-                this.say('❓无源点');
                 return;
             }
         }
@@ -284,6 +279,7 @@ export class MinerCreep extends BaseCreep {
         if (this.creep.store.energy === this.creep.store.getCapacity()) {
             if (this.creepMemory.state !== 'transferring') {
                 this.setState('transferring');
+                this.say('📦去存储');
             }
             this.transferToContainer();
             return;
@@ -292,6 +288,7 @@ export class MinerCreep extends BaseCreep {
         // 开始挖矿
         if (this.creepMemory.state !== 'mining') {
             this.setState('mining');
+            this.say('⛏️开始挖矿');
             this.emitSignal('miner.started_mining', {
                 creep: this.creep,
                 source: this.getAssignedSource()
