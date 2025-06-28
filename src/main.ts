@@ -4,7 +4,6 @@
 
 console.log('🚀 加载事件驱动主循环...');
 
-import { signals } from './SignalSystem';
 import { memory } from './MemoryManager';
 
 // 加载所有管理器，实例化并注册它们的事件监听器
