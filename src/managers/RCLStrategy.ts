@@ -133,6 +133,10 @@ export class RCLStrategy {
 
     /**
      * 为指定角色和能量预算生成最优身体配置
+     * 
+     * 重要约束：所有creep必须满足 work >= carry/3 （即 carry <= work * 3）
+     * 这确保了creep有足够的工作能力相对于其载运能力，避免效率低下的配置
+     * 
      * @param role - creep角色
      * @param energyBudget - 能量预算
      * @returns 身体部件数组
@@ -208,6 +212,9 @@ export class RCLStrategy {
             const currentCarry = body.filter(p => p === CARRY).length;
             const currentMove = body.filter(p => p === MOVE).length;
             
+            // 检查work >= carry/3约束（即carry <= work * 3）
+            const maxAllowedCarry = currentWork * 3;
+            
             // 计算理想的部件数量
             const totalUnits = Math.min(currentWork, currentCarry);
             const idealWork = Math.max(1, Math.floor(totalUnits * workRatio / Math.max(workRatio, carryRatio)));
@@ -220,8 +227,9 @@ export class RCLStrategy {
                 remainingEnergy -= partCosts[WORK] || 0;
                 addedPart = true;
             }
-            // 然后添加CARRY部件
-            else if (currentCarry < idealCarry || (currentWork >= currentCarry && remainingEnergy >= (partCosts[CARRY] || 0))) {
+            // 然后添加CARRY部件（但必须符合work >= carry/3约束）
+            else if ((currentCarry < idealCarry || (currentWork >= currentCarry && remainingEnergy >= (partCosts[CARRY] || 0))) &&
+                     currentCarry < maxAllowedCarry) {
                 if (remainingEnergy >= (partCosts[CARRY] || 0) && body.length < 50) {
                     body.push(CARRY);
                     remainingEnergy -= partCosts[CARRY] || 0;
@@ -240,21 +248,28 @@ export class RCLStrategy {
                 addedPart = true;
             }
             
-            // 如果没有添加任何部件，尝试添加额外的CARRY部件
+            // 如果没有添加任何部件，尝试添加额外的CARRY部件（但必须符合约束）
             if (!addedPart && remainingEnergy >= (partCosts[CARRY] || 0) && body.length < 50) {
-                body.push(CARRY);
-                remainingEnergy -= partCosts[CARRY] || 0;
-                addedPart = true;
+                const updatedWork = body.filter(p => p === WORK).length;
+                const updatedCarry = body.filter(p => p === CARRY).length;
+                const updatedMaxAllowedCarry = updatedWork * 3;
                 
-                // 检查是否需要额外的MOVE部件
-                const finalCarry = body.filter(p => p === CARRY).length;
-                const finalWork = body.filter(p => p === WORK).length;
-                const finalMove = body.filter(p => p === MOVE).length;
-                const finalNeededMoves = finalWork + Math.floor(finalCarry / 2);
-                
-                if (finalMove < finalNeededMoves && remainingEnergy >= (partCosts[MOVE] || 0) && body.length < 50) {
-                    body.push(MOVE);
-                    remainingEnergy -= partCosts[MOVE] || 0;
+                // 只有在不违反work >= carry/3约束时才添加carry部件
+                if (updatedCarry < updatedMaxAllowedCarry) {
+                    body.push(CARRY);
+                    remainingEnergy -= partCosts[CARRY] || 0;
+                    addedPart = true;
+                    
+                    // 检查是否需要额外的MOVE部件
+                    const finalCarry = body.filter(p => p === CARRY).length;
+                    const finalWork = body.filter(p => p === WORK).length;
+                    const finalMove = body.filter(p => p === MOVE).length;
+                    const finalNeededMoves = finalWork + Math.floor(finalCarry / 2);
+                    
+                    if (finalMove < finalNeededMoves && remainingEnergy >= (partCosts[MOVE] || 0) && body.length < 50) {
+                        body.push(MOVE);
+                        remainingEnergy -= partCosts[MOVE] || 0;
+                    }
                 }
             }
             
@@ -296,8 +311,9 @@ export class RCLStrategy {
             carryCount++;
         }
         
-        // 添加额外的carry部件
-        while (remainingEnergy >= (partCosts[CARRY] || 0) && body.length < 49) {
+        // 添加额外的carry部件（但必须符合work >= carry/3约束）
+        const maxAllowedCarry = workCount * 3;
+        while (carryCount < maxAllowedCarry && remainingEnergy >= (partCosts[CARRY] || 0) && body.length < 49) {
             body.push(CARRY);
             remainingEnergy -= partCosts[CARRY] || 0;
             carryCount++;

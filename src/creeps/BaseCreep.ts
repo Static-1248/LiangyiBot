@@ -35,7 +35,6 @@ export class BaseCreep extends SignalEmitter {
         this.defineSignal('creep.task_completed');
         this.defineSignal('creep.state_changed');
         this.defineSignal('creep.died');
-        this.defineSignal('creep.suicide');
 
         // 获取或初始化内存
         this.creepMemory = memory.getCreepMemory(creep.name, {
@@ -211,19 +210,6 @@ export class BaseCreep extends SignalEmitter {
     }
 
     /**
-     * 自杀
-     */
-    public suicide(): ScreepsReturnCode {
-        const result = this.creep.suicide();
-        if (result === OK) {
-            this.emitSignal('creep.suicide', {
-                creep: this.creep
-            });
-        }
-        return result;
-    }
-
-    /**
      * 获取年龄
      */
     public getAge(): number {
@@ -262,20 +248,6 @@ export class BaseCreep extends SignalEmitter {
     protected onEnergyEmpty(data: any): void {
         // 子类可以重写此方法
         // 移除默认说话，让子类决定
-    }
-
-    /**
-     * 信号监听器：接收自杀指令
-     */
-    @signal('creep.should_suicide', 5)
-    protected onShouldSuicide(data: { creepName: string, reason: string, stats?: string }): void {
-        // 只有当信号是针对自己时才自杀
-        if (data.creepName === this.creep.name || data.creepName === 'all') {
-            console.log(`🗡️ ${this.creep.name} 收到自杀指令: ${data.reason} ${data.stats || ''}`);
-            this.say('💀 自杀');
-            this.suicide();
-        }
-        // 移除了不相关creep的日志输出，避免日志刷屏
     }
 
     /**

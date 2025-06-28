@@ -6,11 +6,16 @@ import _ from 'lodash';
  * 管理升级者 (Upgrader) 的行为
  * - 根据RCL等级调整数量和行为
  * - 在需要时请求生成新的 Upgrader
- * - 指挥 Upgrader 获取能量并升级房间控制器
+ * - 监控升级者状态，但不直接控制它们的具体行为
+ * - 具体的采集和升级逻辑由UpgraderCreep自己处理
  */
 class UpgraderManager {
     constructor() {
         signals.connect('system.tick_start', null, () => this.run());
+        
+        // 监听升级相关信号
+        signals.connect('upgrader.controller_upgraded', null, (data: any) => this.onControllerUpgraded(data));
+        signals.connect('upgrader.controller_max_level', null, (data: any) => this.onControllerMaxLevel(data));
     }
 
     /**
@@ -42,153 +47,66 @@ class UpgraderManager {
                 });
             }
 
-            upgraders.forEach(creep => this.handleUpgrader(creep, rcl));
+            // 让upgrader自己运行，而不是由Manager直接控制
+            upgraders.forEach(creep => this.monitorUpgrader(creep));
         }
     }
 
     /**
-     * 控制单个 Upgrader 的行为
-     * @param creep - 要控制的 Upgrader Creep
-     * @param rcl - 房间控制器等级
+     * 监控单个 Upgrader 的状态（不直接控制行为）
+     * @param creep - 要监控的 Upgrader Creep
      */
-    private handleUpgrader(creep: Creep, rcl: number): void {
-        // 状态切换：如果正在升级但能量耗尽，切换到采集状态
-        if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
-            creep.memory.upgrading = false;
-            creep.say('🔄 采集');
-        }
-        // 状态切换：如果正在采集但能量已满，切换到升级状态
-        if (!creep.memory.upgrading && creep.store.getFreeCapacity() === 0) {
-            creep.memory.upgrading = true;
-            creep.say('⚡ 升级');
-        }
-
-        if (creep.memory.upgrading) {
-            this.doUpgrade(creep);
-        } else {
-            this.doHarvest(creep, rcl);
-        }
-    }
-
-    /**
-     * 执行升级任务
-     * @param creep - Upgrader creep
-     */
-    private doUpgrade(creep: Creep): void {
-        const controller = creep.room.controller;
-        if (!controller) return;
-
-        if (creep.upgradeController(controller) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(controller, { visualizePathStyle: { stroke: '#ffffff' } });
-        }
-    }
-
-    /**
-     * 执行采集任务
-     * @param creep - Upgrader creep
-     * @param rcl - 房间控制器等级
-     */
-    private doHarvest(creep: Creep, rcl: number): void {
-        // 检查是否已有目标，避免重复查找
-        if (creep.memory.energyTarget) {
-            const target = Game.getObjectById(creep.memory.energyTarget) as Structure;
-            if (target && this.isValidEnergySource(target)) {
-                if (creep.withdraw(target as any, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-                return;
+    private monitorUpgrader(creep: Creep): void {
+        // 检查upgrader是否正常工作
+        if (!creep.spawning) {
+            // 可以在这里添加一些监控逻辑，比如检查是否卡住等
+            // 但具体的采集和升级行为由UpgraderCreep自己处理
+            
+            // 例如：检查upgrader是否长时间没有移动
+            if (!creep.memory.lastPos) {
+                creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
             } else {
-                // 目标无效，清除缓存
-                delete creep.memory.energyTarget;
-            }
-        }
-
-        // 寻找新的能量源（减少查找频率）
-        if (!creep.memory.energyTarget || Game.time % 5 === 0) {
-            const energySource = this.findBestEnergySource(creep, rcl);
-            if (energySource) {
-                creep.memory.energyTarget = energySource.id;
-                if (creep.withdraw(energySource as any, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(energySource.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
+                const lastPos = creep.memory.lastPos;
+                if (creep.pos.x === lastPos.x && creep.pos.y === lastPos.y) {
+                    if (Game.time - lastPos.time > 10) {
+                        // upgrader可能卡住了，可以发出信号
+                        if (Game.time % 50 === 0) {
+                            console.log(`[UpgraderManager] ${creep.name} 可能卡住了，位置: ${creep.pos}`);
+                        }
+                    }
+                } else {
+                    // 更新位置
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
                 }
-                return;
             }
         }
-
-        // 如果找不到容器/存储，使用source
-        this.harvestFromSource(creep);
     }
 
     /**
-     * 检查能量源是否有效
+     * 处理控制器升级信号
      */
-    private isValidEnergySource(target: any): boolean {
-        if (!target || !target.store) return false;
-        return target.store[RESOURCE_ENERGY] > 0;
-    }
-
-    /**
-     * 寻找最佳能量源
-     */
-    private findBestEnergySource(creep: Creep, rcl: number): Structure | null {
-        if (!RCLStrategy.shouldUseContainers(rcl)) return null;
-
-        // 优先级：控制器附近容器 > 其他容器 > 存储
-        const controller = creep.room.controller;
-        if (controller) {
-            const upgraderContainer = controller.pos.findInRange(FIND_STRUCTURES, 3, {
-                filter: s => s.structureType === STRUCTURE_CONTAINER &&
-                            (s as StructureContainer).store[RESOURCE_ENERGY] > 0
-            })[0];
-            if (upgraderContainer) return upgraderContainer;
-        }
-
-        // 查找其他容器（缓存房间结构）
-        const containers = creep.room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER &&
-                        (s as StructureContainer).store[RESOURCE_ENERGY] > 0
-        });
-        if (containers.length > 0) {
-            return creep.pos.findClosestByRange(containers) as Structure;
-        }
-
-        // 查找存储
-        const storage = creep.room.find(FIND_MY_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_STORAGE &&
-                        (s as StructureStorage).store[RESOURCE_ENERGY] > 0
-        })[0];
+    private onControllerUpgraded(data: { creep: Creep, controller: StructureController, newLevel: number }): void {
+        console.log(`🎉 房间 ${data.controller.room.name} 升级到 RCL ${data.newLevel}！升级者：${data.creep.name}`);
         
-        return storage || null;
+        // 可以在这里触发一些房间升级后的逻辑
+        signals.emit('room.level_upgraded', {
+            roomName: data.controller.room.name,
+            newLevel: data.newLevel,
+            upgrader: data.creep
+        });
     }
 
     /**
-     * 从source采集
+     * 处理控制器达到最大等级信号
      */
-    private harvestFromSource(creep: Creep): void {
-        // 检查是否已有source目标
-        if (creep.memory.sourceTarget) {
-            const source = Game.getObjectById(creep.memory.sourceTarget) as Source;
-            if (source && source.energy > 0) {
-                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(source.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-                return;
-            } else {
-                delete creep.memory.sourceTarget;
-            }
-        }
-
-        // 寻找新source（缓存结果）
-        const sources = creep.room.find(FIND_SOURCES_ACTIVE);
-        if (sources.length > 0) {
-            const source = creep.pos.findClosestByRange(sources);
-            if (source) {
-                creep.memory.sourceTarget = source.id;
-                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(source.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-            }
-        }
+    private onControllerMaxLevel(data: { creep: Creep, controller: StructureController, level: number }): void {
+        console.log(`🏆 房间 ${data.controller.room.name} 已达到最大等级！`);
+        
+        // 可以考虑减少upgrader数量或者重新分配任务
+        signals.emit('room.max_level_reached', {
+            roomName: data.controller.room.name,
+            level: data.level
+        });
     }
 }
 

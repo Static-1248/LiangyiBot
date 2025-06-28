@@ -217,17 +217,24 @@ class SupplierManager {
             }
         }
         
-        // 没有分配矿源，请求分配
+        // 没有分配矿源，请求分配（限制频率）
         if (!harvestPlanner.getAssignedSource(creep.name)) {
-            signals.emit('harvest.need_source', {
-                creepName: creep.name,
-                roomName: creep.room.name,
-                priority: 3, // supplier优先级较高
-                allowCrossRoom: true // 允许使用相邻房间的矿源
-            });
-            
-            if (Game.time % 20 === 0) { // 每20tick调试一次
-                console.log(`[SupplierManager 调试] ${creep.name} 请求矿源分配`);
+            // 只有在没有最近请求过时才发送新请求
+            const lastRequestTime = creep.memory.lastHarvestRequestTime || 0;
+            if (Game.time - lastRequestTime >= 5) { // supplier间隔5tick，优先级最高
+                signals.emit('harvest.need_source', {
+                    creepName: creep.name,
+                    roomName: creep.room.name,
+                    priority: 3, // supplier优先级较高
+                    allowCrossRoom: true // 允许使用相邻房间的矿源
+                });
+                
+                // 记录请求时间
+                creep.memory.lastHarvestRequestTime = Game.time;
+                
+                if (Game.time % 50 === 0) { // 每50tick调试一次
+                    console.log(`[SupplierManager 调试] ${creep.name} 请求矿源分配`);
+                }
             }
         }
         

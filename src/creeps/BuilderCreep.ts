@@ -2,7 +2,8 @@
  * 建造者Creep类 - 负责建筑建造
  */
 import { BaseCreep, BaseCreepMemory } from './BaseCreep';
-import { signal } from '../SignalSystem';
+import { signal, signals } from '../SignalSystem';
+import { harvestPlanner } from '../planners/HarvestPlanner';
 
 // Builder内存接口
 export interface BuilderCreepMemory extends BaseCreepMemory {
@@ -10,6 +11,8 @@ export interface BuilderCreepMemory extends BaseCreepMemory {
     buildTarget?: Id<ConstructionSite>;
     repairTarget?: Id<Structure>;
     energySource?: Id<Source | Structure>;
+    assignedSourceId?: Id<Source>;
+    lastHarvestRequestTime?: number;
 }
 
 export class BuilderCreep extends BaseCreep {
@@ -53,7 +56,7 @@ export class BuilderCreep extends BaseCreep {
     }
 
     /**
-     * 寻找能量来源
+     * 寻找能量来源（优先容器，其次使用HarvestPlanner）
      */
     public findEnergySource(): Source | Structure | null {
         // 优先寻找容器或存储
@@ -65,8 +68,52 @@ export class BuilderCreep extends BaseCreep {
 
         if (container) return container as Structure;
 
-        // 其次寻找源点
-        return this.findClosest(FIND_SOURCES, (source) => source.energy > 0);
+        // 如果没有容器，使用HarvestPlanner请求矿源分配
+        return this.getAssignedSource();
+    }
+
+    /**
+     * 获取分配的矿源
+     */
+    private getAssignedSource(): Source | null {
+        const assignedSourceId = this.creepMemory.assignedSourceId;
+        
+        if (assignedSourceId) {
+            // 已分配矿源，验证是否仍然有效
+            const source = this.safeGetObjectById(assignedSourceId);
+            if (source && source.energy > 0) {
+                return source;
+            } else {
+                // 矿源无效，清除分配并重新请求
+                delete this.creepMemory.assignedSourceId;
+                harvestPlanner.releaseCreepAssignment(this.creep.name);
+            }
+        }
+        
+        // 没有分配矿源，请求分配（限制频率）
+        if (!harvestPlanner.getAssignedSource(this.creep.name)) {
+            // 只有在没有最近请求过时才发送新请求
+            const lastRequestTime = this.creepMemory.lastHarvestRequestTime || 0;
+            if (Game.time - lastRequestTime >= 15) { // builder间隔15tick，优先级较低
+                signals.emit('harvest.need_source', {
+                    creepName: this.creep.name,
+                    roomName: this.creep.room.name,
+                    priority: 5, // builder优先级较低
+                    allowCrossRoom: false // builder通常不跨房间
+                });
+                
+                // 记录请求时间
+                this.creepMemory.lastHarvestRequestTime = Game.time;
+                
+                if (Game.time % 50 === 0) { // 每50tick调试一次
+                    console.log(`[BuilderCreep] ${this.creep.name} 请求矿源分配`);
+                }
+            }
+        }
+        
+        // 在等待分配期间，寻找最近的可用矿源作为临时方案
+        const source = this.findClosest(FIND_SOURCES, (source) => source.energy > 0);
+        return source;
     }
 
     /**
@@ -287,6 +334,17 @@ export class BuilderCreep extends BaseCreep {
                 });
                 this.creepMemory.buildTarget = undefined;
             }
+        }
+    }
+
+    /**
+     * 信号监听器：矿源分配
+     */
+    @signal('harvest.source_assigned', 15)
+    protected onSourceAssigned(data: { creepName: string, sourceId: string, roomName: string }): void {
+        if (data.creepName === this.creep.name) {
+            this.creepMemory.assignedSourceId = data.sourceId as Id<Source>;
+            console.log(`[BuilderCreep] ${this.creep.name} 被分配到矿源 ${data.sourceId}`);
         }
     }
 

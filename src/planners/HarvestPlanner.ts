@@ -117,23 +117,45 @@ class HarvestPlanner {
      * 主运行逻辑
      */
     private run(): void {
+        const startCPU = Game.cpu.getUsed();
+        
         // 减少占用状态更新频率（每5tick更新一次）
         if (Game.time % 5 === 0) {
+            const updateCPU = Game.cpu.getUsed();
             this.updateOccupancyStatus();
+            const updateCost = Game.cpu.getUsed() - updateCPU;
+            if (updateCost > 0.5) {
+                console.log(`⚠️ [HarvestPlanner] updateOccupancyStatus 消耗 ${updateCost.toFixed(3)} CPU`);
+            }
         }
         
         // 每20个tick重新扫描地形
         if (Game.time % this.SCAN_INTERVAL === 0) {
+            const scanCPU = Game.cpu.getUsed();
             this.scanAllSources();
+            const scanCost = Game.cpu.getUsed() - scanCPU;
+            if (scanCost > 0.3) {
+                console.log(`⚠️ [HarvestPlanner] scanAllSources 消耗 ${scanCost.toFixed(3)} CPU`);
+            }
         }
         
         // 每100个tick扫描相邻房间
         if (Game.time % this.ADJACENT_SCAN_INTERVAL === 0) {
+            const adjacentCPU = Game.cpu.getUsed();
             this.scanAdjacentRooms();
+            const adjacentCost = Game.cpu.getUsed() - adjacentCPU;
+            if (adjacentCost > 0.2) {
+                console.log(`⚠️ [HarvestPlanner] scanAdjacentRooms 消耗 ${adjacentCost.toFixed(3)} CPU`);
+            }
         }
         
         // 处理挖矿请求
+        const requestCPU = Game.cpu.getUsed();
         this.processHarvestRequests();
+        const requestCost = Game.cpu.getUsed() - requestCPU;
+        if (requestCost > 0.5) {
+            console.log(`⚠️ [HarvestPlanner] processHarvestRequests 消耗 ${requestCost.toFixed(3)} CPU (${this.harvestRequests.length} 请求)`);
+        }
         
         // 清理超时请求（减少频率）
         if (Game.time % 10 === 0) {
@@ -148,6 +170,11 @@ class HarvestPlanner {
         // 调试信息（每50 ticks输出一次）
         if (Game.time % 50 === 0) {
             this.debugStatus();
+        }
+        
+        const totalCost = Game.cpu.getUsed() - startCPU;
+        if (totalCost > 1.0) {
+            console.log(`🔥 [HarvestPlanner] 总CPU消耗: ${totalCost.toFixed(3)} (请求:${this.harvestRequests.length}, 分配:${Object.keys(this.assignments).length})`);
         }
     }
 
@@ -295,6 +322,9 @@ class HarvestPlanner {
      * 处理挖矿请求
      */
     private handleHarvestRequest(data: any): void {
+        // 添加CPU监控
+        const startCPU = Game.cpu.getUsed();
+        
         const request: HarvestRequest = {
             creepName: data.creepName,
             roomName: data.roomName,
@@ -303,19 +333,54 @@ class HarvestPlanner {
             allowCrossRoom: data.allowCrossRoom || false
         };
         
-        // 检查是否已经有分配
+        // 更严格的重复检查
         if (this.assignments[request.creepName]) {
-            return; // 已经分配了矿源
+            // 如果已经有分配，验证分配是否仍然有效
+            const assignedSourceId = this.assignments[request.creepName];
+            const sourceData = this.sourceDatabase[assignedSourceId];
+            if (sourceData && sourceData.freePositions > 0) {
+                // 分配仍然有效，忽略请求
+                if (Game.time % 100 === 0) { // 减少日志频率
+                    console.log(`[HarvestPlanner] ${request.creepName} 已有有效分配，忽略重复请求`);
+                }
+                return;
+            } else {
+                // 分配无效，清除后继续处理
+                delete this.assignments[request.creepName];
+            }
         }
         
-        // 检查是否已经在请求队列中
-        const existingRequest = this.harvestRequests.find(req => req.creepName === request.creepName);
-        if (existingRequest) {
-            return; // 已经在队列中
+        // 检查是否已经在请求队列中（更严格的检查）
+        const existingRequestIndex = this.harvestRequests.findIndex(req => 
+            req.creepName === request.creepName && 
+            req.roomName === request.roomName
+        );
+        
+        if (existingRequestIndex >= 0) {
+            // 更新现有请求的时间戳和优先级（如果更高）
+            const existingRequest = this.harvestRequests[existingRequestIndex];
+            if (request.priority < existingRequest.priority) {
+                existingRequest.priority = request.priority;
+                existingRequest.requestTime = Game.time;
+                console.log(`[HarvestPlanner] 更新 ${request.creepName} 的请求优先级: ${request.priority}`);
+            }
+            return; // 避免重复添加
+        }
+        
+        // 检查creep是否存在
+        if (!Game.creeps[request.creepName]) {
+            console.log(`[HarvestPlanner] 忽略不存在的creep请求: ${request.creepName}`);
+            return;
         }
         
         this.harvestRequests.push(request);
-        console.log(`[HarvestPlanner] 收到挖矿请求：${request.creepName} 在 ${request.roomName}`);
+        
+        const cpuUsed = Game.cpu.getUsed() - startCPU;
+        if (cpuUsed > 0.1) { // 如果处理请求消耗超过0.1 CPU，记录警告
+            console.log(`⚠️ [HarvestPlanner] 处理请求消耗 ${cpuUsed.toFixed(3)} CPU: ${request.creepName}`);
+        }
+        
+        console.log(`[HarvestPlanner] 收到挖矿请求：${request.creepName} 在 ${request.roomName} (优先级:${request.priority})`);
     }
 
     /**
@@ -750,6 +815,44 @@ class HarvestPlanner {
                 const sourceData = this.sourceDatabase[sourceId];
                 console.log(`  - ${sourceId.substring(0, 8)}... 在 ${sourceData.roomName}: ${sourceData.freePositions}/${sourceData.totalPositions} 空闲`);
             }
+        }
+        
+        if (totalAssignments > 0) {
+            console.log(`[HarvestPlanner 调试] 当前分配:`);
+            for (const creepName in this.assignments) {
+                const sourceId = this.assignments[creepName];
+                const sourceData = this.sourceDatabase[sourceId];
+                console.log(`  - ${creepName} -> ${sourceId.substring(0, 8)}... (${sourceData?.roomName || '未知房间'})`);
+            }
+        }
+    }
+    
+    /**
+     * 强制调试信息输出（可在控制台调用）
+     */
+    public forceDebug(): void {
+        console.log(`🔍 [HarvestPlanner] 强制调试信息 - Tick ${Game.time}`);
+        this.debugStatus();
+        
+        // 输出每个房间的详细信息
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName];
+            if (!room.controller?.my) continue;
+            
+            const sources = room.find(FIND_SOURCES);
+            const containers = room.find(FIND_STRUCTURES, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER
+            });
+            const creeps = room.find(FIND_MY_CREEPS);
+            
+            console.log(`🏠 房间 ${roomName} (RCL ${room.controller.level}):`);
+            console.log(`  - 矿源数量: ${sources.length}`);
+            console.log(`  - 容器数量: ${containers.length}`);
+            console.log(`  - Creep数量: ${creeps.length}`);
+            
+            const supplierCreeps = creeps.filter(c => c.memory.role === 'supplier');
+            const minerCreeps = creeps.filter(c => c.memory.role === 'miner');
+            console.log(`  - Supplier: ${supplierCreeps.length}, Miner: ${minerCreeps.length}`);
         }
     }
 }

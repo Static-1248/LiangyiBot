@@ -7,11 +7,16 @@ import _ from 'lodash';
  * - 根据RCL等级调整数量和优先级
  * - 寻找建筑工地并分配 Builder
  * - 在需要时请求生成新的 Builder
- * - 指挥 Builder 获取能量并建造
+ * - 监控建造者状态，但不直接控制它们的具体行为
+ * - 具体的采集和建造逻辑由BuilderCreep自己处理
  */
 class BuilderManager {
     constructor() {
         signals.connect('system.tick_start', null, () => this.run());
+        
+        // 监听建造相关信号
+        signals.connect('builder.construction_completed', null, (data: any) => this.onConstructionCompleted(data));
+        signals.connect('builder.repair_completed', null, (data: any) => this.onRepairCompleted(data));
     }
 
     /**
@@ -55,181 +60,73 @@ class BuilderManager {
                 });
             }
 
-            // 只有在有建筑工地时才指挥builder工作，否则让它们待机
-            if (constructionSites.length > 0) {
-                builders.forEach(creep => this.handleBuilder(creep, constructionSites, rcl));
-            } else {
-                // 没有建筑工地时，让builder待机在spawn附近
-                builders.forEach(creep => this.handleIdleBuilder(creep));
-            }
+            // 监控builder状态，让它们自己处理具体的工作逻辑
+            builders.forEach(creep => this.monitorBuilder(creep, constructionSites));
         }
     }
 
     /**
-     * 控制单个 Builder 的行为
-     * @param creep - 要控制的 Builder Creep
+     * 监控单个 Builder 的状态（不直接控制行为）
+     * @param creep - 要监控的 Builder Creep
      * @param sites - 当前房间的建筑工地列表
-     * @param rcl - 房间控制器等级
      */
-    private handleBuilder(creep: Creep, sites: ConstructionSite[], rcl: number): void {
-        // 状态切换：如果正在建造但能量耗尽，切换到采集状态
-        if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
-            creep.memory.building = false;
-            creep.say('🔄 采集');
-        }
-        // 状态切换：如果正在采集但能量已满，切换到建造状态
-        if (!creep.memory.building && creep.store.getFreeCapacity() === 0) {
-            creep.memory.building = true;
-            creep.say('🚧 建造');
-        }
-
-        if (creep.memory.building) {
-            this.doBuild(creep, sites);
-        } else {
-            this.doHarvest(creep, rcl);
-        }
-    }
-
-    /**
-     * 执行建造任务（优化版本）
-     * @param creep - Builder creep
-     * @param sites - 建筑工地列表
-     */
-    private doBuild(creep: Creep, sites: ConstructionSite[]): void {
-        // 检查是否已有目标，避免重复查找
-        if (creep.memory.constructionTarget) {
-            const target = Game.getObjectById(creep.memory.constructionTarget as Id<ConstructionSite>);
-            if (target) {
-                if (creep.build(target) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target.pos, { visualizePathStyle: { stroke: '#ffffff' } });
-                }
-                return;
+    private monitorBuilder(creep: Creep, sites: ConstructionSite[]): void {
+        // 检查builder是否正常工作
+        if (!creep.spawning) {
+            // 可以在这里添加一些监控逻辑，比如检查是否卡住等
+            // 但具体的建造和采集行为由BuilderCreep自己处理
+            
+            // 例如：检查builder是否长时间没有移动
+            if (!creep.memory.lastPos) {
+                creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
             } else {
-                // 目标无效，清除缓存
-                delete creep.memory.constructionTarget;
-            }
-        }
-
-        // 寻找新的建筑工地（减少查找频率）
-        if (!creep.memory.constructionTarget || Game.time % 3 === 0) {
-            const target = creep.pos.findClosestByRange(sites); // 使用Range而不是Path
-            if (target) {
-                creep.memory.constructionTarget = target.id;
-                if (creep.build(target) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target.pos, { visualizePathStyle: { stroke: '#ffffff' } });
+                const lastPos = creep.memory.lastPos;
+                if (creep.pos.x === lastPos.x && creep.pos.y === lastPos.y) {
+                    if (Game.time - lastPos.time > 15) {
+                        // builder可能卡住了，可以发出信号
+                        if (Game.time % 50 === 0) {
+                            console.log(`[BuilderManager] ${creep.name} 可能卡住了，位置: ${creep.pos}`);
+                        }
+                    }
+                } else {
+                    // 更新位置
+                    creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: Game.time };
                 }
+            }
+            
+            // 如果没有建筑工地，提示builder待机
+            if (sites.length === 0 && Game.time % 100 === 0) {
+                console.log(`[BuilderManager] 房间 ${creep.room.name} 暂无建筑工地，${creep.name} 待机中`);
             }
         }
     }
 
     /**
-     * 执行采集任务（优化版本）
-     * @param creep - Builder creep
-     * @param rcl - 房间控制器等级
+     * 处理建造完成信号
      */
-    private doHarvest(creep: Creep, rcl: number): void {
-        // 检查是否已有能量目标，避免重复查找
-        if (creep.memory.energyTarget) {
-            const target = Game.getObjectById(creep.memory.energyTarget) as Structure;
-            if (target && this.isValidEnergySource(target)) {
-                if (creep.withdraw(target as any, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-                return;
-            } else {
-                delete creep.memory.energyTarget;
-            }
-        }
-
-        // 寻找新能量源（减少查找频率）
-        if (!creep.memory.energyTarget || Game.time % 5 === 0) {
-            const energySource = this.findBestEnergySource(creep, rcl);
-            if (energySource) {
-                creep.memory.energyTarget = energySource.id;
-                if (creep.withdraw(energySource as any, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(energySource.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-                return;
-            }
-        }
-
-        // 如果找不到容器/存储，使用source
-        this.harvestFromSource(creep);
-    }
-
-    /**
-     * 检查能量源是否有效
-     */
-    private isValidEnergySource(target: any): boolean {
-        if (!target || !target.store) return false;
-        return target.store[RESOURCE_ENERGY] > 0;
-    }
-
-    /**
-     * 寻找最佳能量源
-     */
-    private findBestEnergySource(creep: Creep, rcl: number): Structure | null {
-        if (!RCLStrategy.shouldUseContainers(rcl)) return null;
-
-        // 查找容器（使用缓存的房间结构）
-        const containers = creep.room.find(FIND_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER &&
-                        (s as StructureContainer).store[RESOURCE_ENERGY] > 0
-        });
-        if (containers.length > 0) {
-            return creep.pos.findClosestByRange(containers) as Structure;
-        }
-
-        // 查找存储
-        const storage = creep.room.find(FIND_MY_STRUCTURES, {
-            filter: s => s.structureType === STRUCTURE_STORAGE &&
-                        (s as StructureStorage).store[RESOURCE_ENERGY] > 0
-        })[0];
+    private onConstructionCompleted(data: { creep: Creep, targetId: string }): void {
+        console.log(`🏗️ ${data.creep.name} 完成了建筑任务 ${data.targetId}`);
         
-        return storage || null;
+        // 可以在这里触发一些建造完成后的逻辑
+        signals.emit('room.construction_progress', {
+            roomName: data.creep.room.name,
+            builder: data.creep,
+            completedTarget: data.targetId
+        });
     }
 
     /**
-     * 从source采集
+     * 处理修理完成信号
      */
-    private harvestFromSource(creep: Creep): void {
-        // 检查是否已有source目标
-        if (creep.memory.sourceTarget) {
-            const source = Game.getObjectById(creep.memory.sourceTarget) as Source;
-            if (source && source.energy > 0) {
-                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(source.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-                return;
-            } else {
-                delete creep.memory.sourceTarget;
-            }
-        }
-
-        // 寻找新source
-        const sources = creep.room.find(FIND_SOURCES_ACTIVE);
-        if (sources.length > 0) {
-            const source = creep.pos.findClosestByRange(sources);
-            if (source) {
-                creep.memory.sourceTarget = source.id;
-                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(source.pos, { visualizePathStyle: { stroke: '#ffaa00' } });
-                }
-            }
-        }
-    }
-
-    /**
-     * 处理待机的Builder
-     * @param creep - 待机的Builder creep
-     */
-    private handleIdleBuilder(creep: Creep): void {
-        // 移动到spawn附近待机
-        const spawn = creep.pos.findClosestByPath(FIND_MY_SPAWNS);
-        if (spawn && creep.pos.getRangeTo(spawn) > 3) {
-            creep.moveTo(spawn, { visualizePathStyle: { stroke: '#666666' } });
-        }
-        creep.say('💤 待机');
+    private onRepairCompleted(data: { creep: Creep, target: Structure }): void {
+        console.log(`🔧 ${data.creep.name} 完成了修理任务`);
+        
+        // 可以在这里触发一些修理完成后的逻辑
+        signals.emit('room.repair_progress', {
+            roomName: data.creep.room.name,
+            builder: data.creep,
+            repairedTarget: data.target
+        });
     }
 }
 

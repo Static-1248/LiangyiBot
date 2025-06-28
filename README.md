@@ -21,8 +21,7 @@ src/
 ├── managers/          # 管理器 - 负责高级决策和资源分配
 │   ├── SpawnManager.ts        # 生产管理：智能生成creep
 │   ├── SupplierManager.ts     # 供给管理：spawn/extension能量供应
-│   ├── MinerManager.ts        # 挖矿管理：矿源分配和监控
-│   └── SuicideManager.ts      # 生命周期管理：老化creep处理
+│   └── MinerManager.ts        # 挖矿管理：矿源分配和监控
 ├── creeps/            # Creep类 - 具体执行单位
 │   ├── BaseCreep.ts           # 基础类：所有creep的公共功能
 │   ├── MinerCreep.ts          # 矿工：专精采集特定矿源
@@ -119,7 +118,6 @@ protected onTaskStarted(data: { creep: Creep, taskType: string, target: Source }
 'creep.energy_full'      // creep能量满载
 'creep.energy_empty'     // creep能量耗尽
 'creep.state_changed'    // creep状态变化
-'creep.should_suicide'   // 需要自杀（老化等）
 ```
 
 #### 资源管理信号
