@@ -4,6 +4,7 @@
 
 console.log('🚀 加载事件驱动主循环...');
 
+import { signals } from './SignalSystem';
 import { memory } from './MemoryManager';
 
 // 加载所有管理器，实例化并注册它们的事件监听器
@@ -19,14 +20,6 @@ import './managers/SuicideManager';
 // 加载规划器
 import './planners/BuildingPlanner';
 import './planners/HarvestPlanner';
-
-// 导入creep类
-import { SupplierCreep } from './creeps/SupplierCreep';
-import { MinerCreep } from './creeps/MinerCreep';
-import { HaulerCreep } from './creeps/HaulerCreep';
-import { UpgraderCreep } from './creeps/UpgraderCreep';
-import { BuilderCreep } from './creeps/BuilderCreep';
-import { BaseCreep } from './creeps/BaseCreep';
 
 console.log('✅ 核心模块加载完成');
 
@@ -125,39 +118,29 @@ function detectRoomEvents(): void {
 }
 
 /**
- * 运行creep逻辑 - 创建creep类实例并运行
+ * 运行creep逻辑 - 简单的角色分派
  */
 function runCreeps(): void {
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName];
         const role = creep.memory.role;
         
-        // 根据角色创建对应的creep类实例并运行
+        // 简单的角色分派，让各个Manager处理creep逻辑
+        // 不创建类实例，避免每tick重复创建和信号连接的问题
         try {
-            let creepInstance: BaseCreep;
-            
-            switch (role) {
-                case 'supplier':
-                    creepInstance = new SupplierCreep(creep);
-                    break;
-                case 'miner':
-                    creepInstance = new MinerCreep(creep);
-                    break;
-                case 'hauler':
-                    creepInstance = new HaulerCreep(creep);
-                    break;
-                case 'upgrader':
-                    creepInstance = new UpgraderCreep(creep);
-                    break;
-                case 'builder':
-                    creepInstance = new BuilderCreep(creep);
-                    break;
-                default:
-                    creepInstance = new BaseCreep(creep);
-                    break;
+            // 只需要处理自杀信号检查
+            if (creep.memory.shouldSuicide) {
+                console.log(`🗡️ ${creep.name} 执行延迟自杀`);
+                creep.say('💀 自杀');
+                const result = creep.suicide();
+                if (result === OK) {
+                    signals.emit('creep.suicide', {
+                        creepName: creep.name,
+                        reason: 'delayed_suicide'
+                    });
+                }
+                delete creep.memory.shouldSuicide;
             }
-            
-            creepInstance.run();
         } catch (error) {
             console.log(`Error running creep ${creepName}:`, error);
         }
